@@ -23,24 +23,29 @@ const providers: Record<ProviderMode, ProvisioningProvider> = {
  * Get the current provisioning mode from environment
  *
  * Priority order (if no explicit mode set):
- * 1. Playwright (no cookie rotation needed)
- * 2. Unofficial API (requires cookie rotation)
- * 3. Manual (fallback)
+ * 1. Unofficial API (session cookie based)
+ * 2. Manual (fallback)
+ *
+ * NOTE: Playwright provider is DISABLED due to 2FA on bot account.
+ * If PROVISIONING_MODE=playwright is set, we fall back to unofficial-api.
  */
 export function getProvisioningMode(): ProviderMode {
   const mode = process.env.PROVISIONING_MODE as ProviderMode | undefined;
 
-  // If explicitly set, use that mode
-  if (mode) {
+  // Handle deprecated playwright mode
+  if (mode === "playwright") {
+    console.warn(
+      "[Provisioning] Playwright mode is DISABLED due to 2FA on bot account. " +
+        "Falling back to unofficial-api. " +
+        "Please update PROVISIONING_MODE environment variable."
+    );
+    // Fall through to auto-detect
+  } else if (mode && mode !== "playwright") {
+    // If explicitly set to something other than playwright, use it
     return mode;
   }
 
-  // Auto-detect: prefer Playwright (no cookie rotation), then unofficial-api, then manual
-  const playwrightProvider = providers["playwright"];
-  if (playwrightProvider.isConfigured()) {
-    return "playwright";
-  }
-
+  // Auto-detect: only unofficial-api or manual (Playwright is disabled)
   const apiProvider = providers["unofficial-api"];
   if (apiProvider.isConfigured()) {
     return "unofficial-api";

@@ -18,3 +18,13 @@ if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = db;
 // Re-export all Prisma types
 export * from "@prisma/client";
 export { db as prisma };
+
+// Re-export encryption utilities
+export {
+  encrypt,
+  decrypt,
+  encryptCredentials,
+  decryptCredentials,
+  isEncryptionConfigured,
+  type EncryptedData,
+} from "./encryption";

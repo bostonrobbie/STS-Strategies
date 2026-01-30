@@ -1,16 +1,19 @@
 /**
  * Playwright Provisioning Provider
  *
- * Uses headless browser automation to manage TradingView access.
- * This eliminates the need for manual cookie rotation by logging in
- * programmatically with credentials.
+ * @deprecated DO NOT USE - 2FA on bot account makes this provider unusable.
+ * The TradingView bot account has 2FA enabled which prevents automated login.
+ * This provider is kept for reference but always returns isConfigured: false.
  *
- * ADVANTAGES:
- * - No manual cookie rotation required
+ * Use the unofficial-api provider with session cookies instead.
+ * See: /admin/credentials for cookie management UI.
+ *
+ * ORIGINAL DESIGN (no longer applicable):
+ * - Uses headless browser automation to manage TradingView access.
  * - Fresh login each time = no session expiration issues
  * - Works with 2FA (TOTP)
  *
- * REQUIREMENTS:
+ * REQUIREMENTS (if ever re-enabled):
  * - TV_BOT_EMAIL: TradingView account email
  * - TV_BOT_PASSWORD: TradingView account password
  * - TV_BOT_TOTP_SECRET: (Optional) TOTP secret for 2FA
@@ -56,15 +59,24 @@ function generateTOTP(secret: string): string {
 }
 
 export class PlaywrightProvider implements ProvisioningProvider {
-  name = "playwright";
+  name = "playwright-DISABLED";
   private browser: Browser | null = null;
   private context: BrowserContext | null = null;
 
   /**
    * Check if Playwright provider is configured
+   *
+   * @deprecated Always returns false - provider is disabled due to 2FA on bot account.
    */
   isConfigured(): boolean {
-    return !!(process.env.TV_BOT_EMAIL && process.env.TV_BOT_PASSWORD);
+    // DISABLED: 2FA on bot account prevents automated login
+    // This provider should never be used - return false regardless of env vars
+    console.warn(
+      "[PlaywrightProvider] This provider is DISABLED. " +
+        "2FA on the TradingView bot account prevents automated login. " +
+        "Use unofficial-api provider with session cookies instead."
+    );
+    return false;
   }
 
   /**

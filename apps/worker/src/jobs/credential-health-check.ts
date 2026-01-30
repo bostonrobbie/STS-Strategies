@@ -1,13 +1,16 @@
 /**
  * Credential Health Check Job
  *
- * Monitors provisioning provider health and automatically:
- * 1. Switches to fallback mode when primary provider fails
- * 2. Recovers to primary mode when it becomes healthy again
- * 3. Sends admin alerts on status changes
+ * Monitors provisioning provider health and credential status:
+ * 1. Switches to MANUAL mode when credentials fail health check
+ * 2. Tracks credential age and sends warnings at 7/14 day thresholds
+ * 3. Does NOT auto-recover to AUTO mode - requires admin action
  *
  * SCHEDULE: Every 15 minutes (via BullMQ repeatable job)
- * RECOVERY CHECK: Every 5 minutes when in fallback mode
+ *
+ * IMPORTANT: Auto-recovery is DISABLED. When credentials fail, the system
+ * switches to MANUAL mode and stays there until an admin validates and
+ * saves new credentials via the Admin > Credentials page.
  */
 
 import { Queue, Worker, Job } from "bullmq";
@@ -21,6 +24,14 @@ import {
 } from "../providers/index.js";
 
 // ============================================
+// CONSTANTS
+// ============================================
+
+const CREDENTIAL_WARNING_AGE_HOURS = 7 * 24; // 7 days
+const CREDENTIAL_ALERT_AGE_HOURS = 14 * 24; // 14 days
+const SERVICE_MODE_KEY = "provisioning_service_mode";
+
+// ============================================
 // TYPES
 // ============================================
 
@@ -29,14 +40,111 @@ export interface HealthStatus {
   healthy: boolean;
   checkedAt: Date;
   error?: string;
+  credentialAgeHours?: number;
 }
 
-export interface ProvisioningModeConfig {
-  mode: "primary" | "fallback";
-  activeProvider: ProviderMode;
+export interface ServiceModeConfig {
+  mode: "AUTO" | "MANUAL" | "DISABLED";
   reason?: string;
-  switchedAt?: Date;
-  recoveredAt?: Date;
+  changedAt?: string;
+  changedBy?: string;
+}
+
+// ============================================
+// CREDENTIAL AGE TRACKING
+// ============================================
+
+/**
+ * Get credential age in hours from database
+ */
+async function getCredentialAgeHours(): Promise<number | null> {
+  const credential = await prisma.tradingViewCredential.findFirst({
+    where: { isActive: true },
+    orderBy: { createdAt: "desc" },
+  });
+
+  if (!credential) {
+    return null;
+  }
+
+  const ageMs = Date.now() - credential.createdAt.getTime();
+  return Math.floor(ageMs / (1000 * 60 * 60));
+}
+
+/**
+ * Check if credential age warning should be sent
+ */
+async function checkCredentialAgeWarnings(): Promise<void> {
+  const ageHours = await getCredentialAgeHours();
+
+  if (ageHours === null) {
+    return; // No credentials stored
+  }
+
+  const ageDays = Math.floor(ageHours / 24);
+
+  // Check for 14-day alert (urgent)
+  if (ageHours >= CREDENTIAL_ALERT_AGE_HOURS) {
+    const lastAlertKey = "credential_age_alert_14d";
+    const lastAlert = await prisma.systemConfig.findUnique({
+      where: { key: lastAlertKey },
+    });
+
+    // Only send once per day
+    const lastAlertDate = lastAlert?.value as { sentAt: string } | null;
+    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+
+    if (!lastAlertDate || new Date(lastAlertDate.sentAt).getTime() < oneDayAgo) {
+      await sendProviderStatusAlert(
+        "URGENT: TradingView Credentials Need Refresh",
+        `TradingView credentials are ${ageDays} days old and may expire soon. ` +
+          "Please refresh credentials immediately to avoid service disruption.",
+        {
+          credentialAgeDays: ageDays,
+          credentialAgeHours: ageHours,
+          urgency: "CRITICAL",
+          action: "Go to Admin > Credentials to update",
+        }
+      );
+
+      await prisma.systemConfig.upsert({
+        where: { key: lastAlertKey },
+        update: { value: { sentAt: new Date().toISOString() } },
+        create: { key: lastAlertKey, value: { sentAt: new Date().toISOString() } },
+      });
+    }
+  }
+  // Check for 7-day warning
+  else if (ageHours >= CREDENTIAL_WARNING_AGE_HOURS) {
+    const lastAlertKey = "credential_age_alert_7d";
+    const lastAlert = await prisma.systemConfig.findUnique({
+      where: { key: lastAlertKey },
+    });
+
+    // Only send once per day
+    const lastAlertDate = lastAlert?.value as { sentAt: string } | null;
+    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+
+    if (!lastAlertDate || new Date(lastAlertDate.sentAt).getTime() < oneDayAgo) {
+      await sendProviderStatusAlert(
+        "TradingView Credentials Aging - Consider Refresh",
+        `TradingView credentials are ${ageDays} days old. ` +
+          "Consider refreshing credentials soon to prevent potential service issues.",
+        {
+          credentialAgeDays: ageDays,
+          credentialAgeHours: ageHours,
+          urgency: "WARNING",
+          action: "Go to Admin > Credentials when convenient",
+        }
+      );
+
+      await prisma.systemConfig.upsert({
+        where: { key: lastAlertKey },
+        update: { value: { sentAt: new Date().toISOString() } },
+        create: { key: lastAlertKey, value: { sentAt: new Date().toISOString() } },
+      });
+    }
+  }
 }
 
 // ============================================
@@ -55,11 +163,14 @@ export async function runHealthCheck(): Promise<HealthStatus> {
   // Test with known-good username that should always exist
   const result = await provider.validateUsername("TradingView");
 
+  const credentialAgeHours = await getCredentialAgeHours();
+
   const status: HealthStatus = {
     provider: provider.name,
     healthy: result.success,
     checkedAt: new Date(),
     error: result.error,
+    credentialAgeHours: credentialAgeHours ?? undefined,
   };
 
   // Store health status in SystemConfig
@@ -69,6 +180,20 @@ export async function runHealthCheck(): Promise<HealthStatus> {
     create: { key: "provisioning_health", value: status as any },
   });
 
+  // Update credential validatedAt if healthy
+  if (result.success) {
+    const activeCredential = await prisma.tradingViewCredential.findFirst({
+      where: { isActive: true },
+    });
+
+    if (activeCredential) {
+      await prisma.tradingViewCredential.update({
+        where: { id: activeCredential.id },
+        data: { validatedAt: new Date() },
+      });
+    }
+  }
+
   console.log(
     `[HealthCheck] Provider ${provider.name}: ${status.healthy ? "HEALTHY" : "UNHEALTHY"}`
   );
@@ -77,93 +202,59 @@ export async function runHealthCheck(): Promise<HealthStatus> {
 }
 
 /**
- * Switch to fallback mode when primary provider fails
+ * Get current service mode from database
  */
-export async function switchToFallbackMode(reason: string): Promise<void> {
-  const currentConfig = await getCurrentModeConfig();
+export async function getCurrentServiceMode(): Promise<ServiceModeConfig | null> {
+  const config = await prisma.systemConfig.findUnique({
+    where: { key: SERVICE_MODE_KEY },
+  });
 
-  // Don't switch if already in fallback
-  if (currentConfig?.mode === "fallback") {
-    console.log("[HealthCheck] Already in fallback mode");
+  return config?.value as ServiceModeConfig | null;
+}
+
+/**
+ * Switch to MANUAL mode when credentials fail
+ *
+ * NOTE: Does NOT auto-switch back to AUTO. Admin must validate
+ * and save new credentials via the Admin > Credentials page.
+ */
+export async function switchToManualMode(reason: string): Promise<void> {
+  const currentConfig = await getCurrentServiceMode();
+
+  // Don't switch if already in MANUAL
+  if (currentConfig?.mode === "MANUAL") {
+    console.log("[HealthCheck] Already in MANUAL mode");
     return;
   }
 
-  const modeConfig: ProvisioningModeConfig = {
-    mode: "fallback",
-    activeProvider: "manual",
+  const modeConfig: ServiceModeConfig = {
+    mode: "MANUAL",
     reason,
-    switchedAt: new Date(),
+    changedAt: new Date().toISOString(),
   };
 
-  await prisma.systemConfig.upsert({
-    where: { key: "provisioning_mode_config" },
-    update: { value: modeConfig as any },
-    create: { key: "provisioning_mode_config", value: modeConfig as any },
-  });
+  await prisma.$transaction(async (tx) => {
+    await tx.systemConfig.upsert({
+      where: { key: SERVICE_MODE_KEY },
+      update: { value: modeConfig as any },
+      create: { key: SERVICE_MODE_KEY, value: modeConfig as any },
+    });
 
-  // Create audit log
-  await prisma.auditLog.create({
-    data: {
-      action: "provisioning.switched_to_fallback",
-      details: {
-        reason,
-        previousMode: currentConfig?.activeProvider || "primary",
-        newMode: "manual",
+    // Create audit log
+    await tx.auditLog.create({
+      data: {
+        action: "provisioning.switched_to_manual",
+        details: {
+          reason,
+          previousMode: currentConfig?.mode || "AUTO",
+          newMode: "MANUAL",
+          autoRecoveryDisabled: true,
+        },
       },
-    },
+    });
   });
 
-  console.log(`[HealthCheck] Switched to fallback mode. Reason: ${reason}`);
-}
-
-/**
- * Recover to primary mode when provider becomes healthy
- */
-export async function recoverToPrimaryMode(): Promise<void> {
-  const primaryMode = getProvisioningMode();
-
-  const modeConfig: ProvisioningModeConfig = {
-    mode: "primary",
-    activeProvider: primaryMode,
-    recoveredAt: new Date(),
-  };
-
-  await prisma.systemConfig.upsert({
-    where: { key: "provisioning_mode_config" },
-    update: { value: modeConfig as any },
-    create: { key: "provisioning_mode_config", value: modeConfig as any },
-  });
-
-  // Create audit log
-  await prisma.auditLog.create({
-    data: {
-      action: "provisioning.recovered_to_primary",
-      details: {
-        activeProvider: primaryMode,
-      },
-    },
-  });
-
-  console.log(`[HealthCheck] Recovered to primary mode: ${primaryMode}`);
-}
-
-/**
- * Get current mode configuration from database
- */
-export async function getCurrentModeConfig(): Promise<ProvisioningModeConfig | null> {
-  const config = await prisma.systemConfig.findUnique({
-    where: { key: "provisioning_mode_config" },
-  });
-
-  return config?.value as ProvisioningModeConfig | null;
-}
-
-/**
- * Check if system is in fallback mode
- */
-export async function isInFallbackMode(): Promise<boolean> {
-  const config = await getCurrentModeConfig();
-  return config?.mode === "fallback";
+  console.log(`[HealthCheck] Switched to MANUAL mode. Reason: ${reason}`);
 }
 
 /**
@@ -193,55 +284,56 @@ async function sendProviderStatusAlert(
 /**
  * Process health check job
  *
- * Runs every 15 minutes to check primary provider health.
- * If primary fails, switches to fallback and alerts admin.
+ * Runs every 15 minutes to:
+ * 1. Check primary provider health
+ * 2. Switch to MANUAL mode if unhealthy
+ * 3. Check credential age and send warnings
+ *
+ * NOTE: Does NOT auto-recover to AUTO mode.
  */
 export async function processHealthCheckJob(job: Job): Promise<void> {
   console.log(`[HealthCheck] Running health check job ${job.id}`);
 
   try {
+    // Check credential age warnings first
+    await checkCredentialAgeWarnings();
+
+    // Get current service mode
+    const currentMode = await getCurrentServiceMode();
+
+    // If already in MANUAL mode, just log and return
+    // Admin must manually recover via credentials page
+    if (currentMode?.mode === "MANUAL") {
+      console.log(
+        "[HealthCheck] System in MANUAL mode. Auto-recovery disabled. " +
+          "Admin must update credentials via Admin > Credentials page."
+      );
+      return;
+    }
+
     // Run health check
     const status = await runHealthCheck();
 
     if (!status.healthy) {
-      // Provider is unhealthy
-      const wasInFallback = await isInFallbackMode();
+      // Provider is unhealthy - switch to MANUAL mode
+      await switchToManualMode(status.error || "Health check failed");
 
-      if (!wasInFallback) {
-        // First failure - switch to fallback and alert
-        await switchToFallbackMode(status.error || "Health check failed");
-
-        await sendProviderStatusAlert(
-          "URGENT: Provisioning Provider Degraded",
-          `Primary provider (${status.provider}) failed health check. System has switched to manual fallback mode.`,
-          {
-            provider: status.provider,
-            error: status.error,
-            checkedAt: status.checkedAt,
-            urgency: "HIGH",
-          }
-        );
-      }
-    } else {
-      // Provider is healthy
-      const wasInFallback = await isInFallbackMode();
-
-      if (wasInFallback) {
-        // Recovery! Switch back to primary
-        await recoverToPrimaryMode();
-
-        await sendProviderStatusAlert(
-          "Provisioning Provider Recovered",
-          `Primary provider (${status.provider}) is healthy again. System has resumed normal operations.`,
-          {
-            provider: status.provider,
-            checkedAt: status.checkedAt,
-          }
-        );
-
-        // Process any queued jobs that were waiting
-        await processQueuedProvisioningJobs();
-      }
+      await sendProviderStatusAlert(
+        "URGENT: Provisioning Provider Failed - Manual Mode Active",
+        `Primary provider (${status.provider}) failed health check. ` +
+          "System has switched to MANUAL mode. " +
+          "Automatic provisioning is DISABLED. " +
+          "Admin must update credentials to restore AUTO mode.",
+        {
+          provider: status.provider,
+          error: status.error,
+          checkedAt: status.checkedAt,
+          credentialAgeHours: status.credentialAgeHours,
+          urgency: "CRITICAL",
+          action: "Go to Admin > Credentials to update credentials and restore AUTO mode",
+          autoRecoveryDisabled: true,
+        }
+      );
     }
   } catch (error) {
     console.error("[HealthCheck] Job failed:", error);
@@ -249,75 +341,18 @@ export async function processHealthCheckJob(job: Job): Promise<void> {
   }
 }
 
-/**
- * Process recovery check job (more frequent when in fallback mode)
- *
- * Runs every 5 minutes when in fallback mode to detect recovery faster.
- */
-export async function processRecoveryCheckJob(job: Job): Promise<void> {
-  console.log(`[HealthCheck] Running recovery check job ${job.id}`);
-
-  const inFallback = await isInFallbackMode();
-  if (!inFallback) {
-    console.log("[HealthCheck] Not in fallback mode, skipping recovery check");
-    return;
-  }
-
-  // Run health check
-  const status = await runHealthCheck();
-
-  if (status.healthy) {
-    // Recovery!
-    await recoverToPrimaryMode();
-
-    await sendProviderStatusAlert(
-      "Provisioning Provider Recovered",
-      `Primary provider (${status.provider}) is healthy again. System has resumed normal operations.`,
-      {
-        provider: status.provider,
-        checkedAt: status.checkedAt,
-      }
-    );
-
-    await processQueuedProvisioningJobs();
-  }
-}
-
-/**
- * Process queued provisioning jobs after recovery
- */
-async function processQueuedProvisioningJobs(): Promise<void> {
-  console.log("[HealthCheck] Processing queued provisioning jobs...");
-
-  // Find all PENDING strategy access records that might need reprocessing
-  const pendingAccess = await prisma.strategyAccess.findMany({
-    where: {
-      status: "PENDING",
-      retryCount: { lt: 5 }, // Don't retry exhausted jobs
-    },
-    include: {
-      user: { select: { tradingViewUsername: true } },
-      strategy: { select: { pineId: true } },
-    },
-    take: 50, // Limit batch size
-  });
-
-  if (pendingAccess.length > 0) {
-    console.log(
-      `[HealthCheck] Found ${pendingAccess.length} pending jobs to reprocess`
-    );
-    // These will be picked up by the provisioning worker on its next poll
-  }
-}
-
 // ============================================
 // QUEUE SETUP
 // ============================================
 
-const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL || process.env.REDIS_URL || "";
+const REDIS_URL =
+  process.env.UPSTASH_REDIS_REST_URL || process.env.REDIS_URL || "";
 
 /**
  * Create health check queue and start worker
+ *
+ * NOTE: Recovery check job is REMOVED. Auto-recovery is disabled.
+ * Admin must manually recover via the credentials page.
  */
 export function setupHealthCheckQueue(): {
   queue: Queue;
@@ -333,7 +368,8 @@ export function setupHealthCheckQueue(): {
     },
   });
 
-  // Schedule repeatable jobs
+  // Schedule health check every 15 minutes
+  // NOTE: Recovery check removed - auto-recovery is disabled
   queue.add(
     "health-check",
     {},
@@ -345,26 +381,14 @@ export function setupHealthCheckQueue(): {
     }
   );
 
-  queue.add(
-    "recovery-check",
-    {},
-    {
-      repeat: {
-        every: 5 * 60 * 1000, // 5 minutes
-      },
-      jobId: "recovery-check-5min",
-    }
-  );
-
   // Create worker
   const worker = new Worker(
     "health-check",
     async (job) => {
       if (job.name === "health-check") {
         await processHealthCheckJob(job);
-      } else if (job.name === "recovery-check") {
-        await processRecoveryCheckJob(job);
       }
+      // Recovery check job no longer supported
     },
     {
       connection: {
@@ -384,7 +408,7 @@ export function setupHealthCheckQueue(): {
     console.error(`[HealthCheck] Job ${job?.id} failed:`, error);
   });
 
-  console.log("[HealthCheck] Queue and worker initialized");
+  console.log("[HealthCheck] Queue and worker initialized (auto-recovery DISABLED)");
 
   return { queue, worker };
 }

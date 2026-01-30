@@ -316,3 +316,34 @@ model SystemConfig {
 
   @@map("system_config")
 }
+
+// ============================================
+// TRADINGVIEW CREDENTIAL MANAGEMENT
+// ============================================
+
+model TradingViewCredential {
+  id                    String    @id @default(cuid())
+
+  // Encrypted values (AES-256-GCM)
+  sessionIdEncrypted    Bytes     @map("session_id_encrypted")
+  signatureEncrypted    Bytes     @map("signature_encrypted")
+
+  // Encryption metadata
+  iv                    Bytes     // Initialization vector for AES-GCM
+  authTag               Bytes     @map("auth_tag") // Authentication tag for AES-GCM
+
+  // API configuration
+  apiUrl                String    @map("api_url")
+
+  // Operational status
+  isActive              Boolean   @default(true) @map("is_active")
+  validatedAt           DateTime? @map("validated_at")
+  lastUsedAt            DateTime? @map("last_used_at")
+
+  // Audit trail
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+  createdBy             String?   @map("created_by") // Admin user ID who created this
+
+  @@map("tradingview_credentials")
+}
