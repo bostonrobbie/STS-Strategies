@@ -1,0 +1,33 @@
+# Fly.io configuration for STS Strategies Worker
+# Deploy with: fly deploy --config apps/worker/fly.toml
+
+app = "sts-strategies-worker"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+
+# Worker doesn't need HTTP services, but Fly requires at least one
+# This is a minimal health check endpoint
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+[checks]
+  [checks.health]
+    port = 8080
+    type = "tcp"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512
