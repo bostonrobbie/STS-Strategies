@@ -87,12 +87,39 @@ export function getActiveProvider(): ProvisioningProvider {
 }
 
 /**
- * Execute provisioning with automatic fallback
+ * Options for executeWithFallback
+ */
+export interface ExecuteWithFallbackOptions {
+  /**
+   * Whether to allow fallback to manual provider.
+   * Default: false
+   *
+   * When false and primary provider fails, the operation will throw
+   * rather than falling back to manual. This ensures auth errors
+   * trigger DEGRADED state instead of creating manual tasks.
+   */
+  allowManualFallback?: boolean;
+
+  /**
+   * Callback when falling back to another provider
+   */
+  onFallback?: (primaryError: string, fallbackProvider: ProvisioningProvider) => void;
+}
+
+/**
+ * Execute provisioning with the primary provider.
+ *
+ * IMPORTANT: Manual fallback is DISABLED by default.
+ * - Auth errors should trigger DEGRADED state, not manual tasks
+ * - Manual tasks are only for explicit admin actions
+ * - Set allowManualFallback: true only for explicit admin retry operations
  */
 export async function executeWithFallback<T>(
   operation: (provider: ProvisioningProvider) => Promise<T & { success: boolean }>,
-  onFallback?: (primaryError: string, fallbackProvider: ProvisioningProvider) => void
+  options?: ExecuteWithFallbackOptions
 ): Promise<T & { success: boolean; usedFallback?: boolean }> {
+  const { allowManualFallback = false, onFallback } = options || {};
+
   const primaryMode = getProvisioningMode();
   const primaryProvider = providers[primaryMode];
 
@@ -103,20 +130,42 @@ export async function executeWithFallback<T>(
       if (result.success) {
         return { ...result, usedFallback: false };
       }
-      // Primary failed, try fallback
-      console.log(`[Provisioning] Primary provider "${primaryMode}" failed, trying fallback`);
+      // Primary failed
+      console.log(
+        `[Provisioning] Primary provider "${primaryMode}" failed: ${(result as { message?: string }).message || "unknown error"}`
+      );
     } catch (error) {
       console.error(`[Provisioning] Primary provider error:`, error);
     }
   }
 
-  // Use fallback
+  // Determine fallback
   const fallbackMode = getFallbackMode();
-  if (fallbackMode === primaryMode) {
-    // No different fallback available
-    return operation(primaryProvider) as Promise<T & { success: boolean; usedFallback?: boolean }>;
+
+  // If fallback is manual and manual fallback is disabled, throw
+  // This ensures auth errors trigger DEGRADED state
+  if (fallbackMode === "manual" && !allowManualFallback) {
+    console.log(
+      `[Provisioning] Manual fallback is DISABLED. Primary provider "${primaryMode}" failed without fallback.`
+    );
+    // Return failure result instead of falling back to manual
+    return {
+      success: false,
+      message: `Primary provider "${primaryMode}" failed and manual fallback is disabled`,
+      usedFallback: false,
+    } as T & { success: boolean; usedFallback?: boolean };
   }
 
+  // If fallback is same as primary, no point in retrying
+  if (fallbackMode === primaryMode) {
+    return {
+      success: false,
+      message: `Primary provider "${primaryMode}" failed and no fallback available`,
+      usedFallback: false,
+    } as T & { success: boolean; usedFallback?: boolean };
+  }
+
+  // Use fallback (only if it's not manual, or manual is explicitly allowed)
   const fallbackProvider = providers[fallbackMode];
   onFallback?.(
     `Primary provider "${primaryMode}" unavailable or failed`,

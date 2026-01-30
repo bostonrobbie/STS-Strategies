@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,6 +19,8 @@ import {
   XCircle,
   Activity,
   Server,
+  Key,
+  AlertTriangle,
 } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 
@@ -57,6 +60,12 @@ interface HealthStatus {
   fallbackMode: string;
   fallbackConfigured: boolean;
   status: "healthy" | "degraded" | "manual-only";
+  // New fields for DEGRADED state
+  provisioningState?: "HEALTHY" | "DEGRADED";
+  degradedAt?: string;
+  degradedReason?: string;
+  healthyAt?: string;
+  incidentId?: string;
 }
 
 interface ProvisioningStats {
@@ -202,6 +211,45 @@ export default function ProvisioningHealthPage() {
           Refresh
         </Button>
       </div>
+
+      {/* DEGRADED Alert Banner */}
+      {health?.provisioningState === "DEGRADED" && (
+        <Card className="border-red-500 bg-red-50 dark:bg-red-950/30">
+          <CardContent className="py-4">
+            <div className="flex items-start gap-4">
+              <AlertTriangle className="h-6 w-6 text-red-600 mt-0.5 flex-shrink-0" />
+              <div className="flex-1">
+                <h3 className="text-lg font-semibold text-red-800 dark:text-red-200">
+                  Provisioning System DEGRADED
+                </h3>
+                <p className="text-sm text-red-700 dark:text-red-300 mt-1">
+                  {health.degradedReason || "TradingView credentials may have expired or are invalid."}
+                </p>
+                <p className="text-sm text-red-700 dark:text-red-300 mt-1">
+                  <strong>New checkouts are blocked</strong> until credentials are updated.
+                </p>
+                <div className="flex flex-wrap gap-4 mt-2 text-xs text-red-600 dark:text-red-400">
+                  <span>Since: {health.degradedAt ? new Date(health.degradedAt).toLocaleString() : "Unknown"}</span>
+                  {health.incidentId && <span>Incident: {health.incidentId}</span>}
+                  <span>Pending Jobs: {stats.pending}</span>
+                </div>
+                <div className="mt-4 flex gap-3">
+                  <Button asChild variant="destructive" size="sm">
+                    <Link href="/admin/credentials">
+                      <Key className="h-4 w-4 mr-2" />
+                      Update Credentials
+                    </Link>
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={fetchData}>
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Check Status
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* System Health */}
       {health && (

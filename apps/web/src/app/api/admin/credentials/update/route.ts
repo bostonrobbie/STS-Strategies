@@ -3,6 +3,10 @@
  *
  * Validates, encrypts, and stores new TradingView credentials.
  * Automatically switches service mode to AUTO if credentials are valid.
+ *
+ * INCIDENT RECOVERY:
+ * - Sets provisioning_state to HEALTHY
+ * - Resumes all PENDING provisioning jobs
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -14,6 +18,8 @@ import {
   isEncryptionConfigured,
 } from "@sts/database";
 import { z } from "zod";
+import { setHealthy, getProvisioningState } from "@/lib/provisioning-state";
+import { resumePendingJobs, getPendingJobsCount } from "@/lib/job-resume";
 
 const updateSchema = z.object({
   sessionId: z.string().min(1, "Session ID is required"),
@@ -23,6 +29,7 @@ const updateSchema = z.object({
 
 const REQUEST_TIMEOUT_MS = 15000;
 const SERVICE_MODE_KEY = "provisioning_service_mode";
+const PROVISIONING_STATE_KEY = "provisioning_state";
 
 export async function POST(request: NextRequest) {
   try {
@@ -160,6 +167,11 @@ export async function POST(request: NextRequest) {
       signature,
     });
 
+    // Check current state before update (for reporting)
+    const previousState = await getProvisioningState();
+    const pendingJobsCount = await getPendingJobsCount();
+    const wasInIncident = previousState.state === "DEGRADED";
+
     // Store in transaction
     const result = await prisma.$transaction(async (tx) => {
       // Deactivate existing credentials
@@ -204,6 +216,31 @@ export async function POST(request: NextRequest) {
         },
       });
 
+      // Set provisioning_state to HEALTHY
+      const healthyAt = new Date().toISOString();
+      await tx.systemConfig.upsert({
+        where: { key: PROVISIONING_STATE_KEY },
+        update: {
+          value: {
+            state: "HEALTHY",
+            healthyAt,
+            lastCheckedAt: healthyAt,
+            // Clear incident data
+            reason: undefined,
+            degradedAt: undefined,
+            incidentId: undefined,
+          },
+        },
+        create: {
+          key: PROVISIONING_STATE_KEY,
+          value: {
+            state: "HEALTHY",
+            healthyAt,
+            lastCheckedAt: healthyAt,
+          },
+        },
+      });
+
       // Create audit log
       await tx.auditLog.create({
         data: {
@@ -213,6 +250,9 @@ export async function POST(request: NextRequest) {
             credentialId: credential.id,
             apiUrl: effectiveApiUrl,
             modeChangedTo: "AUTO",
+            wasInIncident,
+            previousIncidentId: previousState.incidentId,
+            pendingJobsAtRecovery: pendingJobsCount,
           },
         },
       });
@@ -220,11 +260,35 @@ export async function POST(request: NextRequest) {
       return credential;
     });
 
+    // Resume pending jobs (outside transaction)
+    let resumeResult = null;
+    if (pendingJobsCount > 0) {
+      try {
+        resumeResult = await resumePendingJobs(session.user.id);
+        console.log(
+          `[Credentials] Resumed ${resumeResult.requeued} jobs after credential update`
+        );
+      } catch (resumeError) {
+        console.error("[Credentials] Failed to resume jobs:", resumeError);
+        // Don't fail the whole operation - credentials are updated
+      }
+    }
+
     return NextResponse.json({
       success: true,
       credentialId: result.id,
       mode: "AUTO",
-      message: "Credentials saved and service mode set to AUTO",
+      message: wasInIncident
+        ? `Incident resolved. Credentials saved and ${resumeResult?.requeued || 0} pending jobs resumed.`
+        : "Credentials saved and service mode set to AUTO",
+      recovery: wasInIncident
+        ? {
+            wasInIncident: true,
+            previousIncidentId: previousState.incidentId,
+            jobsResumed: resumeResult?.requeued || 0,
+            jobsFailed: resumeResult?.failed || 0,
+          }
+        : undefined,
     });
   } catch (error) {
     console.error("Credential update error:", error);

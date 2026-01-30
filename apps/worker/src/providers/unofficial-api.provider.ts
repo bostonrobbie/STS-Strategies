@@ -31,7 +31,13 @@ export class UnofficialApiProvider implements ProvisioningProvider {
 
   async validateUsername(
     username: string
-  ): Promise<{ success: boolean; username?: string; error?: string }> {
+  ): Promise<{
+    success: boolean;
+    username?: string;
+    error?: string;
+    message?: string;
+    metadata?: Record<string, unknown>;
+  }> {
     if (!this.isConfigured()) {
       return {
         success: false,
@@ -50,9 +56,37 @@ export class UnofficialApiProvider implements ProvisioningProvider {
 
       if (!response.ok) {
         const error = await response.text();
+
+        // Detect auth errors (401, 403) - indicates credential failure
+        if (response.status === 401 || response.status === 403) {
+          console.error(
+            `[UnofficialApiProvider] AUTH ERROR ${response.status}: ${error}`
+          );
+          return {
+            success: false,
+            error: `AUTH_ERROR: ${response.status} - ${error}`,
+            message: `AUTH_ERROR: TradingView authentication failed (${response.status})`,
+            metadata: {
+              authError: true,
+              httpStatus: response.status,
+              httpStatusText: response.statusText,
+            },
+          };
+        }
+
+        // 404 typically means user doesn't exist - not an auth error
+        if (response.status === 404) {
+          return {
+            success: false,
+            error: `Username not found: ${error}`,
+            metadata: { httpStatus: 404 },
+          };
+        }
+
         return {
           success: false,
-          error: `Validation failed: ${error}`,
+          error: `Validation failed (${response.status}): ${error}`,
+          metadata: { httpStatus: response.status },
         };
       }
 
@@ -98,9 +132,27 @@ export class UnofficialApiProvider implements ProvisioningProvider {
 
       if (!response.ok) {
         const error = await response.text();
+
+        // Detect auth errors (401, 403) - indicates credential failure
+        if (response.status === 401 || response.status === 403) {
+          console.error(
+            `[UnofficialApiProvider] AUTH ERROR ${response.status}: ${error}`
+          );
+          return {
+            success: false,
+            message: `AUTH_ERROR: TradingView authentication failed (${response.status}) - ${error}`,
+            metadata: {
+              authError: true,
+              httpStatus: response.status,
+              httpStatusText: response.statusText,
+            },
+          };
+        }
+
         return {
           success: false,
-          message: `Grant failed: ${error}`,
+          message: `Grant failed (${response.status}): ${error}`,
+          metadata: { httpStatus: response.status },
         };
       }
 
@@ -145,9 +197,27 @@ export class UnofficialApiProvider implements ProvisioningProvider {
 
       if (!response.ok) {
         const error = await response.text();
+
+        // Detect auth errors (401, 403) - indicates credential failure
+        if (response.status === 401 || response.status === 403) {
+          console.error(
+            `[UnofficialApiProvider] AUTH ERROR ${response.status}: ${error}`
+          );
+          return {
+            success: false,
+            message: `AUTH_ERROR: TradingView authentication failed (${response.status}) - ${error}`,
+            metadata: {
+              authError: true,
+              httpStatus: response.status,
+              httpStatusText: response.statusText,
+            },
+          };
+        }
+
         return {
           success: false,
-          message: `Revoke failed: ${error}`,
+          message: `Revoke failed (${response.status}): ${error}`,
+          metadata: { httpStatus: response.status },
         };
       }
 

@@ -2,12 +2,14 @@
  * GET /api/admin/credentials/status
  *
  * Returns the current TradingView credential status and service mode.
+ * Includes provisioning state for DEGRADED indicator.
  */
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@sts/database";
+import { getProvisioningState, type ProvisioningStateValue } from "@/lib/provisioning-state";
 
 interface CredentialStatus {
   hasCredentials: boolean;
@@ -16,6 +18,12 @@ interface CredentialStatus {
   credentialAgeHours: number | null;
   apiUrl: string | null;
   mode: "AUTO" | "MANUAL" | "DISABLED";
+  // Provisioning state for incident handling
+  provisioningState: ProvisioningStateValue;
+  degradedAt: string | null;
+  degradedReason: string | null;
+  incidentId: string | null;
+  pendingJobsCount: number;
   credentialHistory: {
     id: string;
     createdAt: string;
@@ -85,6 +93,14 @@ export async function GET() {
       mode ||
       (activeCredential || hasEnvCredentials ? "AUTO" : "MANUAL");
 
+    // Get provisioning state
+    const provisioningState = await getProvisioningState();
+
+    // Count pending jobs
+    const pendingJobsCount = await prisma.strategyAccess.count({
+      where: { status: "PENDING" },
+    });
+
     const status: CredentialStatus = {
       hasCredentials: !!activeCredential || hasEnvCredentials,
       isValid: activeCredential?.validatedAt !== null || hasEnvCredentials,
@@ -92,6 +108,12 @@ export async function GET() {
       credentialAgeHours,
       apiUrl: activeCredential?.apiUrl || process.env.TV_ACCESS_API_URL || null,
       mode: effectiveMode,
+      // Provisioning state info
+      provisioningState: provisioningState.state,
+      degradedAt: provisioningState.degradedAt || null,
+      degradedReason: provisioningState.reason || null,
+      incidentId: provisioningState.incidentId || null,
+      pendingJobsCount,
       credentialHistory: credentialHistory.map((c) => ({
         id: c.id,
         createdAt: c.createdAt.toISOString(),

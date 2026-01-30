@@ -30,6 +30,12 @@ interface CredentialStatus {
   credentialAgeHours: number | null;
   apiUrl: string | null;
   mode: "AUTO" | "MANUAL" | "DISABLED";
+  // Provisioning state for incident handling
+  provisioningState?: "HEALTHY" | "DEGRADED";
+  degradedAt?: string;
+  degradedReason?: string;
+  incidentId?: string;
+  pendingJobsCount?: number;
   credentialHistory: {
     id: string;
     createdAt: string;
@@ -181,10 +187,18 @@ export default function CredentialsPage() {
         throw new Error(data.error.message);
       }
 
-      toast({
-        title: "Credentials Saved",
-        description: "Credentials saved and service mode set to AUTO",
-      });
+      // Show appropriate success message
+      if (data.recovery?.wasInIncident) {
+        toast({
+          title: "Incident Resolved",
+          description: `Credentials saved. ${data.recovery.jobsResumed} pending job${data.recovery.jobsResumed !== 1 ? "s" : ""} resumed.`,
+        });
+      } else {
+        toast({
+          title: "Credentials Saved",
+          description: data.message || "Credentials saved and service mode set to AUTO",
+        });
+      }
 
       // Clear form and refresh status
       setSessionId("");
@@ -268,6 +282,51 @@ export default function CredentialsPage() {
           Refresh
         </Button>
       </div>
+
+      {/* DEGRADED Alert */}
+      {status?.provisioningState === "DEGRADED" && (
+        <Card className="border-red-500 bg-red-50 dark:bg-red-950/30">
+          <CardContent className="py-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0" />
+              <div className="flex-1">
+                <h4 className="font-medium text-red-800 dark:text-red-200">
+                  System is DEGRADED - Credential Update Required
+                </h4>
+                <p className="text-sm text-red-700 dark:text-red-300 mt-1">
+                  {status.degradedReason || "TradingView authentication has failed."}
+                </p>
+                <p className="text-sm text-red-700 dark:text-red-300 mt-1">
+                  <strong>New checkouts are blocked</strong> until you update credentials below.
+                </p>
+                <div className="flex flex-wrap gap-4 mt-2 text-xs text-red-600 dark:text-red-400">
+                  <span>Since: {status.degradedAt ? new Date(status.degradedAt).toLocaleString() : "Unknown"}</span>
+                  {status.incidentId && <span>Incident: {status.incidentId}</span>}
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Pending Jobs Info (shown when DEGRADED or has pending jobs) */}
+      {status?.pendingJobsCount && status.pendingJobsCount > 0 && (
+        <Card className="border-amber-300 bg-amber-50/50 dark:border-amber-800 dark:bg-amber-950/20">
+          <CardContent className="py-4">
+            <div className="flex items-center gap-3">
+              <Clock className="h-5 w-5 text-amber-600" />
+              <div>
+                <p className="font-medium text-amber-800 dark:text-amber-200">
+                  {status.pendingJobsCount} provisioning job{status.pendingJobsCount !== 1 ? "s" : ""} waiting
+                </p>
+                <p className="text-sm text-amber-700 dark:text-amber-300">
+                  These will be processed automatically when you save valid credentials.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Current Status */}
       {status && (

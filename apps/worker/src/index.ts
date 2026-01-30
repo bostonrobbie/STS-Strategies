@@ -4,6 +4,7 @@
 import { Worker, QueueEvents } from "bullmq";
 import IORedis from "ioredis";
 import { config, validateConfig } from "./lib/config.js";
+import { prisma } from "./lib/prisma.js";
 import {
   processProvisioningJob,
   ProvisioningJobData,
@@ -76,13 +77,62 @@ queueEvents.on("stalled", ({ jobId }) => {
   console.warn(`⚠️  Job ${jobId} has stalled`);
 });
 
+// ============================================================================
+// Worker Heartbeat
+// Writes lastSeen timestamp to database every 60 seconds for health monitoring
+// ============================================================================
+const HEARTBEAT_INTERVAL_MS = 60000; // 60 seconds
+const workerId = `worker-${process.pid}-${Date.now()}`;
+let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+
+async function sendHeartbeat(): Promise<void> {
+  try {
+    await prisma.systemConfig.upsert({
+      where: { key: "worker_heartbeat" },
+      update: {
+        value: {
+          lastSeen: new Date().toISOString(),
+          workerId,
+          uptime: Math.floor(process.uptime()),
+          memoryUsageMB: Math.floor(process.memoryUsage().heapUsed / 1024 / 1024),
+        },
+      },
+      create: {
+        key: "worker_heartbeat",
+        value: {
+          lastSeen: new Date().toISOString(),
+          workerId,
+          uptime: Math.floor(process.uptime()),
+          memoryUsageMB: Math.floor(process.memoryUsage().heapUsed / 1024 / 1024),
+        },
+      },
+    });
+  } catch (error) {
+    console.error("[Heartbeat] Failed to update:", error);
+  }
+}
+
+// Start heartbeat
+heartbeatInterval = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS);
+// Send initial heartbeat immediately
+sendHeartbeat().catch(console.error);
+console.log(`💓 Heartbeat started (interval: ${HEARTBEAT_INTERVAL_MS / 1000}s, workerId: ${workerId})`);
+
 // Graceful shutdown
 async function shutdown(): Promise<void> {
   console.log("\n🛑 Shutting down worker...");
 
+  // Stop heartbeat
+  if (heartbeatInterval) {
+    clearInterval(heartbeatInterval);
+    heartbeatInterval = null;
+    console.log("💔 Heartbeat stopped");
+  }
+
   await provisioningWorker.close();
   await queueEvents.close();
   await redisConnection.quit();
+  await prisma.$disconnect();
 
   console.log("👋 Worker shutdown complete");
   process.exit(0);

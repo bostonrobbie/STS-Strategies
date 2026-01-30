@@ -489,6 +489,178 @@ ADMIN_ALERT_EMAILS="admin@example.com,ops@example.com"
 
 ---
 
+## DEGRADED State & Zero-Downtime Recovery
+
+This section explicitly documents the three critical operational requirements:
+
+### 1. Credentials Stored Encrypted in Database (Not Env Vars)
+
+**Answer: YES**
+
+Credentials are stored encrypted at rest in the `TradingViewCredential` database table using AES-256-GCM encryption:
+
+```
+Database: TradingViewCredential table
+├── sessionIdEncrypted  (Bytes)  - AES-256-GCM encrypted
+├── signatureEncrypted  (Bytes)  - AES-256-GCM encrypted
+├── iv                  (Bytes)  - Unique per-credential initialization vector
+├── authTag             (Bytes)  - GCM authentication tag (tamper detection)
+└── isActive            (Boolean) - Only one active at a time
+```
+
+**Key location:** `CREDENTIAL_ENCRYPTION_KEY` env var holds the 32-byte encryption key (base64-encoded).
+
+**NOT stored in env vars:** The actual session cookies are never stored in environment variables. The legacy `TV_SESSION_ID` and `TV_SIGNATURE` env vars exist only for backwards compatibility during migration and are deprecated.
+
+**Implementation:** `packages/database/src/encryption.ts` and `apps/worker/src/services/tradingview-access/credential-manager.ts`
+
+---
+
+### 2. Worker Reads Credentials Dynamically (Not Only at Startup)
+
+**Answer: YES**
+
+The worker reads credentials from the database **on every job execution**, not at startup:
+
+```typescript
+// apps/worker/src/services/tradingview-access/credential-manager.ts
+export async function getActiveCredentials(): Promise<TradingViewCredentials | null> {
+  // Queries database on EVERY call - no caching
+  const dbCredential = await prisma.tradingViewCredential.findFirst({
+    where: { isActive: true },
+    orderBy: { createdAt: "desc" },
+  });
+  // ... decrypt and return
+}
+```
+
+**Call flow for each provisioning job:**
+1. Job dequeued from BullMQ
+2. `processProvisioningJob()` executes
+3. `grantAccess()` or `revokeAccess()` called
+4. Each call invokes `getActiveCredentials()` → fresh database query
+5. Credentials decrypted in memory, used, then discarded
+
+**No worker restart required:** When admin updates credentials via the UI, the next job automatically uses the new credentials.
+
+---
+
+### 3. DEGRADED Recovery Without Redeployment
+
+**Answer: YES**
+
+The system supports full incident recovery without redeploying any service:
+
+#### DEGRADED State Storage
+
+State stored in `SystemConfig` table with key `provisioning_state`:
+
+```typescript
+// apps/worker/src/services/provisioning-state.ts
+interface ProvisioningState {
+  state: "HEALTHY" | "DEGRADED";
+  reason?: string;
+  degradedAt?: string;      // ISO timestamp
+  incidentId?: string;      // Tracking ID like "INC-M5K2J-A8B3C"
+}
+```
+
+#### Automatic DEGRADED Transition
+
+When a provisioning job encounters auth errors (401/403), the system automatically:
+
+1. Detects auth error via `isAuthErrorResult()`
+2. Calls `transitionToDegraded(reason)`
+3. Updates `SystemConfig` with DEGRADED state
+4. Sends admin alert email with incident ID
+5. Job stays as PENDING (not FAILED) for automatic retry
+
+```typescript
+// apps/worker/src/processors/provisioning.processor.ts
+if (isAuthErrorResult(result)) {
+  await transitionToDegraded(`Auth error: ${result.message}`);
+  // Job kept PENDING, will retry after recovery
+}
+```
+
+#### Recovery Flow (No Redeployment)
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                     INCIDENT RECOVERY FLOW                          │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  1. DEGRADED Detected                                               │
+│     └─▶ Auth error on job → transitionToDegraded()                  │
+│     └─▶ Admin alert email sent                                      │
+│     └─▶ Jobs stay PENDING (not FAILED)                              │
+│                                                                     │
+│  2. Admin Updates Credentials (via /admin/credentials)              │
+│     └─▶ New cookies entered in UI                                   │
+│     └─▶ Validation API tests against TradingView                    │
+│     └─▶ If valid: encrypt & store in database                       │
+│                                                                     │
+│  3. Automatic Recovery Triggered                                    │
+│     └─▶ transitionToHealthy() updates SystemConfig                  │
+│     └─▶ resumePendingJobs() re-queues all PENDING jobs              │
+│     └─▶ Jobs use new credentials (dynamic read)                     │
+│                                                                     │
+│  4. System Returns to HEALTHY                                       │
+│     └─▶ No restart needed                                           │
+│     └─▶ No redeployment needed                                      │
+│     └─▶ Audit log records incident duration                         │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+#### Job Resume Implementation
+
+When credentials are updated, pending jobs are automatically resumed:
+
+```typescript
+// apps/web/src/lib/job-resume.ts
+export async function resumePendingJobs(adminId?: string): Promise<ResumeResult> {
+  // Find all PENDING StrategyAccess records
+  const pendingAccess = await db.strategyAccess.findMany({
+    where: { status: "PENDING" },
+  });
+
+  // Re-queue each with fresh job ID
+  for (const access of pendingAccess) {
+    await provisioningQueue.add("provision-access", {
+      strategyAccessId: access.id,
+      isResume: true,  // Flag for resumed jobs
+    }, {
+      jobId: `resume-${access.id}-${Date.now()}`,
+      backoff: { type: "exponential", delay: 5000 }, // 5s for resumed
+    });
+  }
+}
+```
+
+#### Why No Redeployment Needed
+
+| Component | Storage | Update Mechanism |
+|-----------|---------|------------------|
+| Credentials | Database (encrypted) | Admin UI → database write |
+| Provisioning State | Database (`SystemConfig`) | State manager → database write |
+| Pending Jobs | Database (`StrategyAccess`) | Status field, re-queued to BullMQ |
+| Worker Config | Database query per-job | No caching, fresh reads |
+
+**All state is in the database.** Workers are stateless and query the database on every operation.
+
+---
+
+### Operational Summary
+
+| Question | Answer | Evidence |
+|----------|--------|----------|
+| Encrypted in DB? | ✅ YES | AES-256-GCM in `TradingViewCredential` table |
+| Dynamic credential reads? | ✅ YES | Database queried per-job, never cached |
+| Recovery without redeployment? | ✅ YES | Database state transition + job resume |
+
+---
+
 ## Testing
 
 ### Integration Tests

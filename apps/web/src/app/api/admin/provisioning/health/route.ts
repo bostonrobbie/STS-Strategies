@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@sts/database";
+import { getProvisioningState, type ProvisioningState } from "@/lib/provisioning-state";
 
 export async function GET() {
   try {
@@ -78,8 +79,36 @@ export async function GET() {
     const mode = process.env.PROVISIONING_MODE || (tvApiConfigured ? "unofficial-api" : "manual");
     const fallbackMode = process.env.PROVISIONING_FALLBACK_MODE || "manual";
 
+    // Get provisioning state from database (new system)
+    const provisioningState = await getProvisioningState();
+
+    // Get worker heartbeat status
+    const workerHeartbeat = await prisma.systemConfig.findUnique({
+      where: { key: "worker_heartbeat" },
+    });
+
+    type WorkerHeartbeatValue = {
+      lastSeen?: string;
+      workerId?: string;
+      uptime?: number;
+      memoryUsageMB?: number;
+    };
+
+    const heartbeatValue = workerHeartbeat?.value as WorkerHeartbeatValue | null;
+    const workerLastSeen = heartbeatValue?.lastSeen
+      ? new Date(heartbeatValue.lastSeen)
+      : null;
+    const WORKER_HEALTHY_THRESHOLD_MS = 120000; // 2 minutes
+    const workerHealthy = workerLastSeen
+      ? (Date.now() - workerLastSeen.getTime()) < WORKER_HEALTHY_THRESHOLD_MS
+      : false;
+
+    // Determine status based on both env vars and provisioning_state
+    // DEGRADED state takes precedence (auth/credential failure)
     let status: "healthy" | "degraded" | "manual-only";
-    if (mode !== "manual" && tvApiConfigured) {
+    if (provisioningState.state === "DEGRADED") {
+      status = "degraded";
+    } else if (mode !== "manual" && tvApiConfigured) {
       status = "healthy";
     } else if (fallbackMode !== "manual") {
       status = "degraded";
@@ -101,6 +130,21 @@ export async function GET() {
         fallbackMode,
         fallbackConfigured: fallbackMode === "manual" ? true : false,
         status,
+        // New fields for DEGRADED state handling
+        provisioningState: provisioningState.state,
+        degradedAt: provisioningState.degradedAt,
+        degradedReason: provisioningState.reason,
+        healthyAt: provisioningState.healthyAt,
+        incidentId: provisioningState.incidentId,
+      },
+      // Worker health monitoring
+      worker: {
+        healthy: workerHealthy,
+        lastSeen: workerLastSeen?.toISOString() || null,
+        workerId: heartbeatValue?.workerId || null,
+        uptime: heartbeatValue?.uptime || null,
+        memoryUsageMB: heartbeatValue?.memoryUsageMB || null,
+        staleThresholdMs: WORKER_HEALTHY_THRESHOLD_MS,
       },
       pendingRecords,
       failedRecords,

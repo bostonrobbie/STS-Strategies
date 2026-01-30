@@ -8,6 +8,7 @@ import {
   validateTradingViewUsername,
   shouldBlockCheckout,
 } from "@/lib/tradingview-validator";
+import { getProvisioningState } from "@/lib/provisioning-state";
 
 export async function POST(req: NextRequest) {
   try {
@@ -60,6 +61,39 @@ export async function POST(req: NextRequest) {
           },
         },
         { status: 400 }
+      );
+    }
+
+    // ===========================================
+    // PROVISIONING STATE CHECK - Block if DEGRADED
+    // When system is in DEGRADED state (credential failure),
+    // we block checkout to prevent users from paying for
+    // access that cannot be provisioned.
+    // ===========================================
+    const provisioningState = await getProvisioningState();
+    if (provisioningState.state === "DEGRADED") {
+      // Audit the blocked checkout
+      await db.auditLog.create({
+        data: {
+          userId: user.id,
+          action: "checkout.blocked_degraded",
+          details: {
+            reason: provisioningState.reason,
+            degradedAt: provisioningState.degradedAt,
+            incidentId: provisioningState.incidentId,
+          },
+        },
+      });
+
+      return NextResponse.json(
+        {
+          error: {
+            code: "SERVICE_TEMPORARILY_UNAVAILABLE",
+            message:
+              "We're currently performing maintenance. Please try again in a few minutes.",
+          },
+        },
+        { status: 503 }
       );
     }
 

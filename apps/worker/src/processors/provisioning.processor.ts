@@ -1,12 +1,38 @@
 // Provisioning Processor
 // Handles TradingView access provisioning jobs using the provider framework
+//
+// DEGRADED State Behavior:
+// - When system is DEGRADED, jobs are deferred (thrown back to queue)
+// - Auth errors (401/403) trigger transition to DEGRADED
+// - Jobs stay PENDING during incidents (not marked FAILED permanently)
 
 import { Job } from "bullmq";
 import { PrismaClient, AccessStatus } from "@prisma/client";
 import { executeWithFallback, checkProvisioningHealth } from "../providers/index.js";
 import { emailService } from "../services/email.service.js";
+import {
+  getProvisioningState,
+  transitionToDegraded,
+  isAuthErrorResult,
+} from "../services/provisioning-state.js";
 
 const prisma = new PrismaClient();
+
+// Custom error for DEGRADED state - allows BullMQ to handle retry differently
+export class DegradedStateError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DegradedStateError";
+  }
+}
+
+// Custom error for auth failures - triggers DEGRADED transition
+export class AuthError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AuthError";
+  }
+}
 
 export interface ProvisioningJobData {
   strategyAccessId: string;
@@ -29,6 +55,23 @@ export async function processProvisioningJob(
   const attempt = (job.data.attempt || 0) + 1;
 
   console.log(`[Provisioning] Processing job ${job.id} (attempt ${attempt})`);
+
+  // ===========================================
+  // DEGRADED STATE CHECK
+  // If system is DEGRADED, defer processing by throwing
+  // This keeps jobs in queue until credentials are restored
+  // ===========================================
+  const provisioningState = await getProvisioningState();
+  if (provisioningState.state === "DEGRADED") {
+    console.log(
+      `[Provisioning] System is DEGRADED - deferring job ${job.id} (reason: ${provisioningState.reason})`
+    );
+    // Throw a specific error that BullMQ will use to retry later
+    // Use a longer delay for degraded state retries
+    throw new DegradedStateError(
+      `System is in DEGRADED state: ${provisioningState.reason}`
+    );
+  }
 
   // Log health status on first attempt
   if (attempt === 1) {
@@ -83,12 +126,25 @@ export async function processProvisioningJob(
       };
     }
 
-    // Execute provisioning with automatic fallback to manual provider
+    // Execute provisioning with the primary provider
+    // NOTE: Manual fallback is disabled - auth errors trigger DEGRADED state instead
     const result = await executeWithFallback(
       async (provider) => {
         // First validate the username
         console.log(`[Provisioning] Validating TV username with ${provider.name}: ${user.tradingViewUsername}`);
         const validateResult = await provider.validateUsername(user.tradingViewUsername!);
+
+        // Check for auth error in validation
+        if (isAuthErrorResult(validateResult)) {
+          console.error(`[Provisioning] Auth error during validation: ${validateResult.message}`);
+          // This will be handled below
+          return {
+            success: false,
+            message: `AUTH_ERROR: ${validateResult.message}`,
+            metadata: { authError: true },
+            requiresManualAction: false,
+          };
+        }
 
         // Only fail on validation for non-manual providers
         if (!validateResult.success && provider.name !== "manual") {
@@ -113,10 +169,48 @@ export async function processProvisioningJob(
 
         return grantResult;
       },
-      (primaryError, fallbackProvider) => {
-        console.log(`[Provisioning] Falling back to ${fallbackProvider.name}: ${primaryError}`);
+      {
+        // Disable automatic fallback to manual provider
+        allowManualFallback: false,
+        onFallback: (primaryError, fallbackProvider) => {
+          console.log(`[Provisioning] Falling back to ${fallbackProvider.name}: ${primaryError}`);
+        },
       }
     );
+
+    // ===========================================
+    // AUTH ERROR DETECTION
+    // If result indicates auth error, transition to DEGRADED
+    // and keep the job in queue (throw to retry later)
+    // ===========================================
+    if (isAuthErrorResult(result)) {
+      const authErrorMsg = result.message || "TradingView authentication failed";
+      console.error(`[Provisioning] Auth error detected: ${authErrorMsg}`);
+
+      // Transition system to DEGRADED state
+      await transitionToDegraded(authErrorMsg, {
+        metadata: {
+          triggeringJob: job.id,
+          strategyAccessId,
+          userId,
+          strategyId,
+        },
+      });
+
+      // Don't mark as FAILED - keep as PENDING for retry after recovery
+      await prisma.strategyAccess.update({
+        where: { id: strategyAccessId },
+        data: {
+          failureReason: `System degraded: ${authErrorMsg}`,
+          retryCount: attempt,
+          lastAttemptAt: new Date(),
+          // Status stays PENDING, not FAILED
+        },
+      });
+
+      // Throw to requeue - will be deferred until system is HEALTHY
+      throw new AuthError(authErrorMsg);
+    }
 
     if (!result.success && !result.requiresManualAction) {
       const errorMsg = `Failed to grant access: ${result.message}`;
@@ -216,8 +310,37 @@ export async function processProvisioningJob(
     const errorMsg = error instanceof Error ? error.message : "Unknown error";
     console.error(`[Provisioning] Error processing job ${job.id}:`, error);
 
-    // Update the access record with failure
-    await updateAccessFailed(strategyAccessId, errorMsg, attempt).catch(console.error);
+    // Handle DEGRADED state errors - just re-throw for retry
+    if (error instanceof DegradedStateError) {
+      // Don't update access record - it stays PENDING
+      console.log(`[Provisioning] Job ${job.id} deferred due to DEGRADED state`);
+      throw error; // Re-throw to trigger retry with backoff
+    }
+
+    // Handle auth errors - don't mark as FAILED
+    if (error instanceof AuthError) {
+      // Access record already updated above, just re-throw for retry
+      console.log(`[Provisioning] Job ${job.id} deferred due to auth error`);
+      throw error; // Re-throw to trigger retry
+    }
+
+    // For other errors, mark as FAILED after max retries
+    // But keep as PENDING for retry-able errors before max attempts
+    const maxAttempts = 5; // Match BullMQ config
+    if (attempt >= maxAttempts) {
+      await updateAccessFailed(strategyAccessId, errorMsg, attempt).catch(console.error);
+    } else {
+      // Keep as PENDING with failure reason for non-final attempts
+      await prisma.strategyAccess.update({
+        where: { id: strategyAccessId },
+        data: {
+          failureReason: errorMsg,
+          retryCount: attempt,
+          lastAttemptAt: new Date(),
+          // Status stays PENDING until final attempt
+        },
+      }).catch(console.error);
+    }
 
     throw error; // Re-throw to trigger retry
   }

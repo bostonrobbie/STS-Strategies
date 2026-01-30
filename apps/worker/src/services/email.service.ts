@@ -131,6 +131,77 @@ ${config.appName} Worker Alert
       `.trim(),
     });
   }
+
+  /**
+   * Send a DEGRADED state alert to admin.
+   * Called when credential failure is detected.
+   */
+  async sendDegradedAlert(params: {
+    reason: string;
+    pendingJobsCount: number;
+    incidentId: string;
+  }): Promise<boolean> {
+    const { reason, pendingJobsCount, incidentId } = params;
+
+    return this.sendAdminAlert({
+      subject: "URGENT: Provisioning System DEGRADED",
+      message: `The TradingView provisioning system has entered DEGRADED mode.
+
+WARNING: NEW CHECKOUTS ARE BLOCKED until credentials are updated.
+
+Reason: ${reason}
+
+Pending Jobs: ${pendingJobsCount} job(s) waiting to be processed
+
+Incident ID: ${incidentId}
+
+ACTION REQUIRED:
+1. Go to ${config.appUrl}/admin/credentials
+2. Update TradingView session cookies (sessionid + sessionid_sign)
+3. Validate and save new credentials
+4. Pending jobs will automatically resume
+
+Direct Link: ${config.appUrl}/admin/credentials`,
+      details: {
+        urgency: "CRITICAL",
+        state: "DEGRADED",
+        reason,
+        pendingJobs: pendingJobsCount,
+        incidentId,
+        timestamp: new Date().toISOString(),
+        actionUrl: `${config.appUrl}/admin/credentials`,
+      },
+    });
+  }
+
+  /**
+   * Send a recovery notification when system returns to HEALTHY state.
+   */
+  async sendRecoveryAlert(params: {
+    incidentId?: string;
+    jobsResumed: number;
+    incidentDuration?: string;
+  }): Promise<boolean> {
+    const { incidentId, jobsResumed, incidentDuration } = params;
+
+    return this.sendAdminAlert({
+      subject: "Provisioning System Recovered",
+      message: `The TradingView provisioning system has recovered to HEALTHY state.
+
+Checkouts are now enabled.
+${jobsResumed} pending job(s) have been resumed.
+
+${incidentId ? `Resolved Incident: ${incidentId}` : ""}
+${incidentDuration ? `Incident Duration: ${incidentDuration}` : ""}`,
+      details: {
+        state: "HEALTHY",
+        incidentId,
+        jobsResumed,
+        incidentDuration,
+        timestamp: new Date().toISOString(),
+      },
+    });
+  }
 }
 
 export const emailService = new EmailService();
