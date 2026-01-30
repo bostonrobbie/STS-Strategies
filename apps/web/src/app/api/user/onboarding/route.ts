@@ -3,6 +3,10 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { onboardingSchema } from "@sts/shared/schemas";
+import {
+  validateTradingViewUsername,
+  shouldBlockCheckout,
+} from "@/lib/tradingview-validator";
 
 export async function POST(req: NextRequest) {
   try {
@@ -17,7 +21,7 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json();
 
-    // Validate input
+    // Validate input format
     const result = onboardingSchema.safeParse(body);
     if (!result.success) {
       return NextResponse.json(
@@ -37,7 +41,7 @@ export async function POST(req: NextRequest) {
 
     const { tradingViewUsername } = result.data;
 
-    // Check if TradingView username is already taken
+    // Check if TradingView username is already taken in our system
     const existingUser = await db.user.findUnique({
       where: { tradingViewUsername },
     });
@@ -54,11 +58,44 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Update user
+    // ===========================================
+    // STRICT VALIDATION: Validate username exists on TradingView
+    // NO graceful degradation - block if validation fails
+    // ===========================================
+    const validation = await validateTradingViewUsername(tradingViewUsername);
+    const blockResult = shouldBlockCheckout(validation);
+
+    if (blockResult.block) {
+      // Audit the validation failure
+      await db.auditLog.create({
+        data: {
+          userId: session.user.id,
+          action: "onboarding.validation_failed",
+          details: {
+            tradingViewUsername,
+            reason: validation.reason,
+            error: validation.error,
+          },
+        },
+      });
+
+      return NextResponse.json(
+        {
+          error: {
+            code: blockResult.errorCode,
+            message: blockResult.message,
+          },
+        },
+        { status: blockResult.statusCode }
+      );
+    }
+
+    // Update user - ONLY if validation passed
     await db.user.update({
       where: { id: session.user.id },
       data: {
         tradingViewUsername,
+        tradingViewUsernameVerified: true, // Set ONLY after successful validation
         onboarded: true,
         termsAcceptedAt: new Date(),
       },
@@ -71,6 +108,7 @@ export async function POST(req: NextRequest) {
         action: "user.onboarded",
         details: {
           tradingViewUsername,
+          validated: true,
         },
       },
     });

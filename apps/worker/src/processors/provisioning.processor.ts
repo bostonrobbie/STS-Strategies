@@ -1,9 +1,9 @@
 // Provisioning Processor
-// Handles TradingView access provisioning jobs
+// Handles TradingView access provisioning jobs using the provider framework
 
 import { Job } from "bullmq";
 import { PrismaClient, AccessStatus } from "@prisma/client";
-import { tradingViewService } from "../services/tradingview.service.js";
+import { executeWithFallback, checkProvisioningHealth } from "../providers/index.js";
 import { emailService } from "../services/email.service.js";
 
 const prisma = new PrismaClient();
@@ -18,6 +18,8 @@ export interface ProvisioningJobData {
 export interface ProvisioningResult {
   success: boolean;
   message: string;
+  usedFallback?: boolean;
+  requiresManualAction?: boolean;
 }
 
 export async function processProvisioningJob(
@@ -27,6 +29,12 @@ export async function processProvisioningJob(
   const attempt = (job.data.attempt || 0) + 1;
 
   console.log(`[Provisioning] Processing job ${job.id} (attempt ${attempt})`);
+
+  // Log health status on first attempt
+  if (attempt === 1) {
+    const health = await checkProvisioningHealth();
+    console.log(`[Provisioning] System health: ${health.status} (mode: ${health.mode})`);
+  }
 
   try {
     // Get the strategy access record with related data
@@ -70,40 +78,48 @@ export async function processProvisioningJob(
       // Leave as PENDING for manual processing
       return {
         success: true,
-        message: "Awaiting manual provisioning",
+        message: "Awaiting manual provisioning (auto-provision disabled)",
+        requiresManualAction: true,
       };
     }
 
-    // Check if TradingView API is configured
-    if (!tradingViewService.isConfigured()) {
-      console.warn("[Provisioning] TradingView API not configured");
-      // Leave as PENDING for manual processing
-      await emailService.sendAdminAlert({
-        subject: "Manual Provisioning Required",
-        message: `TradingView API not configured. Manual provisioning required.`,
-        details: {
-          strategyAccessId,
-          userId: user.id,
-          userEmail: user.email,
-          tradingViewUsername: user.tradingViewUsername,
-          strategyName: strategy.name,
+    // Execute provisioning with automatic fallback to manual provider
+    const result = await executeWithFallback(
+      async (provider) => {
+        // First validate the username
+        console.log(`[Provisioning] Validating TV username with ${provider.name}: ${user.tradingViewUsername}`);
+        const validateResult = await provider.validateUsername(user.tradingViewUsername!);
+
+        // Only fail on validation for non-manual providers
+        if (!validateResult.success && provider.name !== "manual") {
+          return {
+            success: false,
+            message: `Invalid TradingView username: ${validateResult.error}`,
+            requiresManualAction: false,
+          };
+        }
+
+        // Grant access
+        console.log(`[Provisioning] Granting access with ${provider.name} to ${strategy.pineId}`);
+        const grantResult = await provider.grantAccess({
+          username: user.tradingViewUsername!,
           pineId: strategy.pineId,
-        },
-      });
-      return {
-        success: true,
-        message: "Awaiting manual provisioning (API not configured)",
-      };
-    }
+          duration: "1L", // Lifetime
+          strategyName: strategy.name,
+          userEmail: user.email,
+          userId: user.id,
+          strategyAccessId: strategyAccessId,
+        });
 
-    // Validate the TradingView username
-    console.log(`[Provisioning] Validating TV username: ${user.tradingViewUsername}`);
-    const validateResult = await tradingViewService.validateUsername(
-      user.tradingViewUsername
+        return grantResult;
+      },
+      (primaryError, fallbackProvider) => {
+        console.log(`[Provisioning] Falling back to ${fallbackProvider.name}: ${primaryError}`);
+      }
     );
 
-    if (!validateResult.success) {
-      const errorMsg = `Invalid TradingView username: ${validateResult.error}`;
+    if (!result.success && !result.requiresManualAction) {
+      const errorMsg = `Failed to grant access: ${result.message}`;
       await updateAccessFailed(strategyAccessId, errorMsg, attempt);
       await notifyAccessFailed(user, strategy, errorMsg);
       return {
@@ -112,21 +128,43 @@ export async function processProvisioningJob(
       };
     }
 
-    // Grant access
-    console.log(`[Provisioning] Granting access to ${strategy.pineId}`);
-    const grantResult = await tradingViewService.grantAccess({
-      username: user.tradingViewUsername,
-      pineId: strategy.pineId,
-      duration: "1L", // Lifetime
-    });
+    // Handle manual provisioning case
+    if (result.requiresManualAction) {
+      // Update to PENDING with note about manual action
+      await prisma.strategyAccess.update({
+        where: { id: strategyAccessId },
+        data: {
+          status: AccessStatus.PENDING,
+          failureReason: "Awaiting manual provisioning",
+          retryCount: attempt,
+          lastAttemptAt: new Date(),
+        },
+      });
 
-    if (!grantResult.success) {
-      const errorMsg = `Failed to grant access: ${grantResult.error}`;
-      await updateAccessFailed(strategyAccessId, errorMsg, attempt);
-      await notifyAccessFailed(user, strategy, errorMsg);
+      // Create audit log
+      await prisma.auditLog.create({
+        data: {
+          userId: user.id,
+          action: "access.pending_manual",
+          details: {
+            strategyAccessId,
+            strategyId: strategy.id,
+            strategyName: strategy.name,
+            pineId: strategy.pineId,
+            tradingViewUsername: user.tradingViewUsername,
+            attempt,
+            usedFallback: result.usedFallback,
+          },
+        },
+      });
+
+      console.log(`[Provisioning] Manual provisioning required for ${strategyAccessId}`);
+
       return {
-        success: false,
-        message: errorMsg,
+        success: true,
+        message: result.message,
+        requiresManualAction: true,
+        usedFallback: result.usedFallback,
       };
     }
 
@@ -154,6 +192,7 @@ export async function processProvisioningJob(
           pineId: strategy.pineId,
           tradingViewUsername: user.tradingViewUsername,
           attempt,
+          usedFallback: result.usedFallback,
         },
       },
     });
@@ -171,6 +210,7 @@ export async function processProvisioningJob(
     return {
       success: true,
       message: "Access granted successfully",
+      usedFallback: result.usedFallback,
     };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : "Unknown error";
@@ -218,6 +258,25 @@ async function updateAccessFailed(
         },
       },
     });
+
+    // Check for repeated failures - alert admin on 3rd+ failure
+    if (attempt >= 3) {
+      await emailService.sendAdminAlert({
+        subject: `URGENT: Repeated Provisioning Failure (Attempt ${attempt})`,
+        message: `Access provisioning has failed ${attempt} times for a user. Manual intervention may be required.`,
+        details: {
+          strategyAccessId,
+          userId: access.userId,
+          userEmail: access.user.email,
+          tradingViewUsername: access.user.tradingViewUsername || "Not set",
+          strategyName: access.strategy.name,
+          pineId: access.strategy.pineId,
+          failureReason: reason,
+          attemptCount: attempt,
+          urgency: attempt >= 5 ? "CRITICAL" : "HIGH",
+        },
+      });
+    }
   }
 }
 

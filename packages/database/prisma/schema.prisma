@@ -60,7 +60,8 @@ model User {
   image               String?
 
   // TradingView integration
-  tradingViewUsername String?   @unique @map("trading_view_username")
+  tradingViewUsername         String?   @unique @map("trading_view_username")
+  tradingViewUsernameVerified Boolean   @default(false) @map("trading_view_username_verified")
 
   // Role and status
   role                UserRole  @default(USER)

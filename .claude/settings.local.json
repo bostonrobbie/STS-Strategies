@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:www.tradingview.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:terms.law)",
+      "mcp__filesystem__list_directory",
+      "mcp__filesystem__read_text_file",
+      "mcp__ac0e7f41-8554-4c41-9ed5-c9c90e6b6e1f__search_stripe_documentation",
+      "Bash(git init:*)",
+      "Bash(git remote add:*)",
+      "Bash(git status:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "mcp__filesystem__directory_tree",
+      "mcp__filesystem__read_multiple_files",
+      "Bash(cd:*)",
+      "Bash(grep:*)"
+    ]
+  }
+}

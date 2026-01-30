@@ -4,6 +4,10 @@ import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { createCheckoutSession } from "@/lib/stripe";
 import { absoluteUrl } from "@/lib/utils";
+import {
+  validateTradingViewUsername,
+  shouldBlockCheckout,
+} from "@/lib/tradingview-validator";
 
 export async function POST(req: NextRequest) {
   try {
@@ -59,12 +63,77 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // ===========================================
+    // STRICT VALIDATION GATE - Defense in Depth
+    // Even if username was verified at onboarding,
+    // re-validate at checkout time
+    // ===========================================
+
+    // First check: Username must be verified (from onboarding)
+    if (!user.tradingViewUsernameVerified) {
+      return NextResponse.json(
+        {
+          error: {
+            code: "USERNAME_NOT_VERIFIED",
+            message:
+              "Your TradingView username must be verified before purchase. Please update it in settings.",
+          },
+        },
+        { status: 403 }
+      );
+    }
+
+    // Second check: Re-validate at checkout (defense in depth)
+    const validation = await validateTradingViewUsername(
+      user.tradingViewUsername
+    );
+    const blockResult = shouldBlockCheckout(validation);
+
+    if (blockResult.block) {
+      // If validation fails now, invalidate the stored verification
+      if (validation.reason === "INVALID") {
+        await db.user.update({
+          where: { id: user.id },
+          data: { tradingViewUsernameVerified: false },
+        });
+      }
+
+      // Audit the validation failure at checkout
+      await db.auditLog.create({
+        data: {
+          userId: user.id,
+          action: "checkout.validation_failed",
+          details: {
+            tradingViewUsername: user.tradingViewUsername,
+            reason: validation.reason,
+            error: validation.error,
+          },
+        },
+      });
+
+      return NextResponse.json(
+        {
+          error: {
+            code: blockResult.errorCode,
+            message: blockResult.message,
+          },
+        },
+        { status: blockResult.statusCode }
+      );
+    }
+
+    // ===========================================
+    // Validation passed - proceed with checkout
+    // ===========================================
+
     // Create Stripe checkout session
     const checkoutSession = await createCheckoutSession({
       userId: user.id,
       email: user.email,
       tradingViewUsername: user.tradingViewUsername,
-      successUrl: absoluteUrl("/dashboard?success=true&session_id={CHECKOUT_SESSION_ID}"),
+      successUrl: absoluteUrl(
+        "/dashboard?success=true&session_id={CHECKOUT_SESSION_ID}"
+      ),
       cancelUrl: absoluteUrl("/pricing?canceled=true"),
     });
 
@@ -86,6 +155,7 @@ export async function POST(req: NextRequest) {
         action: "checkout.initiated",
         details: {
           sessionId: checkoutSession.id,
+          usernameValidated: true,
         },
       },
     });

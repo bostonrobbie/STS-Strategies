@@ -89,3 +89,19 @@ export async function addEmailJob(
   }
   return emailQueue.add(jobName, data);
 }
+
+/**
+ * Generic job helper - adds job to provisioning queue
+ * Use for new-strategy-grant, provisioning, etc.
+ */
+export async function addJob(
+  jobName: string,
+  data: Record<string, unknown>,
+  options?: { jobId?: string; delay?: number }
+) {
+  if (!provisioningQueue) {
+    console.error("Provisioning queue not available");
+    return null;
+  }
+  return provisioningQueue.add(jobName, data, options);
+}
