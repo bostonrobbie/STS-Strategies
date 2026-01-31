@@ -4,7 +4,8 @@ export const PRICING = {
   CURRENCY: "usd",
   PRODUCT_NAME: "STS Strategies - Lifetime Access",
   PRODUCT_DESCRIPTION:
-    "One-time payment for lifetime access to all 6 NQ trading strategies",
+    "One-time payment for lifetime access to all 6 NQ trading strategies with automated TradingView provisioning",
+  DISPLAY_PRICE: "$99.00",
 } as const;
 
 // Access status labels
@@ -65,5 +66,9 @@ export const SEO = {
   SITE_NAME: "STS Strategies",
   DEFAULT_TITLE: "STS Strategies - Professional NQ Trading Strategies",
   DEFAULT_DESCRIPTION:
-    "Access 6 professional NQ/NASDAQ trading strategies built on 15 years of historical data. One-time payment for lifetime access to systematic trading edge.",
+    "Access 6 professional NQ/NASDAQ trading strategies built on 15 years of historical data. One-time payment for lifetime access to systematic trading edge. Automated TradingView provisioning included.",
+  SITE_URL: process.env.NEXT_PUBLIC_APP_URL || "https://sts-strategies.com",
+  TWITTER_HANDLE: "@STSStrategies",
+  OG_IMAGE: "/og-image.png",
+  CANONICAL_URL: process.env.NEXT_PUBLIC_APP_URL || "https://sts-strategies.com",
 } as const;

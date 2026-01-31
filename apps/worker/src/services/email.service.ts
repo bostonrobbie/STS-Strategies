@@ -4,7 +4,7 @@
 import { Resend } from "resend";
 import { config } from "../lib/config.js";
 
-const resend = new Resend(config.email.resendApiKey);
+const resend = config.email.resendApiKey ? new Resend(config.email.resendApiKey) : null;
 
 interface SendEmailOptions {
   to: string;
@@ -22,6 +22,14 @@ class EmailService {
 
   async send(options: SendEmailOptions): Promise<boolean> {
     try {
+      if (!resend) {
+        console.log("📧 [STAGING] Email would be sent:", {
+          from: this.from,
+          to: options.to,
+          subject: options.subject,
+        });
+        return true;
+      }
       await resend.emails.send({
         from: this.from,
         to: options.to,

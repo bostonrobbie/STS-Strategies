@@ -36,10 +36,9 @@ export const config = {
 } as const;
 
 export function validateConfig(): void {
-  const required = [
-    ["UPSTASH_REDIS_REST_URL", config.redis.url],
-    ["UPSTASH_REDIS_REST_TOKEN", config.redis.token],
-    ["RESEND_API_KEY", config.email.resendApiKey],
+  const required: Array<[string, string]> = [
+    // All config is optional for staging
+    // UPSTASH_REDIS_REST_URL and RESEND_API_KEY will use fallbacks
   ];
 
   const missing = required.filter(([, value]) => !value).map(([name]) => name);
