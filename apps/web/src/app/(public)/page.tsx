@@ -22,6 +22,7 @@ import {
   TrendingUp,
   Zap,
   CheckCircle,
+  Sparkles,
 } from "lucide-react";
 import { db } from "@/lib/db";
 import { formatCurrency } from "@/lib/utils";
@@ -45,16 +46,24 @@ export default async function HomePage() {
       
       {/* Hero Section */}
       <section className="relative overflow-hidden py-24 md:py-32 lg:py-40">
-        <div className="absolute inset-0 bg-gradient-to-b from-muted/30 via-background to-background" />
+        {/* Gradient Background */}
+        <div className="absolute inset-0 gradient-bg" />
+        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-background/50 to-background" />
+        
+        {/* Animated Glow Effect */}
+        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary/10 rounded-full blur-3xl animate-pulse" />
+        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-secondary/10 rounded-full blur-3xl animate-pulse delay-1000" />
+        
         <div className="container relative">
           <div className="mx-auto max-w-4xl text-center animate-in">
             <Badge 
               variant="secondary" 
-              className="mb-6 px-4 py-1.5 text-sm font-medium"
+              className="mb-6 px-4 py-1.5 text-sm font-medium border border-primary/20 bg-primary/5"
             >
+              <Sparkles className="mr-2 h-3 w-3 inline" />
               Professional NQ/NASDAQ Strategies
             </Badge>
-            <h1 className="text-balance text-4xl font-bold tracking-tight sm:text-5xl md:text-6xl lg:text-7xl">
+            <h1 className="text-balance text-4xl font-bold tracking-tight sm:text-5xl md:text-6xl lg:text-7xl gradient-text">
               Add a Systematic Edge to Your Trading
             </h1>
             <p className="mx-auto mt-6 max-w-2xl text-balance text-lg text-muted-foreground sm:text-xl md:mt-8">
@@ -63,13 +72,13 @@ export default async function HomePage() {
               fees.
             </p>
             <div className="mt-10 flex flex-col items-center gap-4 sm:flex-row sm:justify-center md:mt-12">
-              <Button size="lg" className="w-full sm:w-auto group" asChild>
+              <Button size="lg" className="w-full sm:w-auto group glow-hover shadow-lg" asChild>
                 <Link href="/pricing">
                   Get Lifetime Access
                   <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
                 </Link>
               </Button>
-              <Button size="lg" variant="outline" className="w-full sm:w-auto" asChild>
+              <Button size="lg" variant="outline" className="w-full sm:w-auto border-2" asChild>
                 <Link href="/strategies">View Strategies</Link>
               </Button>
             </div>
@@ -81,9 +90,9 @@ export default async function HomePage() {
       </section>
 
       {/* How It Works */}
-      <section className="border-t py-24 md:py-32">
+      <section className="border-t py-24 md:py-32 relative">
         <div className="container">
-          <div className="mx-auto max-w-2xl text-center mb-16 md:mb-20">
+          <div className="mx-auto max-w-2xl text-center mb-16 md:mb-20 scale-in">
             <h2 className="text-balance text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl">
               How It Works
             </h2>
@@ -92,27 +101,27 @@ export default async function HomePage() {
             </p>
           </div>
           <div className="mx-auto grid max-w-5xl gap-8 md:grid-cols-3 md:gap-12">
-            <div className="relative text-center">
-              <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/5 ring-1 ring-primary/10">
-                <span className="text-2xl font-bold text-primary">1</span>
+            <div className="relative text-center slide-in-left">
+              <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 ring-2 ring-primary/20 shadow-lg">
+                <span className="text-3xl font-bold gradient-text">1</span>
               </div>
               <h3 className="mb-3 text-xl font-semibold">Purchase Access</h3>
               <p className="text-balance text-muted-foreground">
                 One-time payment for lifetime access to all strategies. No subscriptions.
               </p>
             </div>
-            <div className="relative text-center">
-              <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/5 ring-1 ring-primary/10">
-                <span className="text-2xl font-bold text-primary">2</span>
+            <div className="relative text-center scale-in">
+              <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-secondary/20 to-secondary/5 ring-2 ring-secondary/20 shadow-lg">
+                <span className="text-3xl font-bold gradient-text">2</span>
               </div>
               <h3 className="mb-3 text-xl font-semibold">Get TradingView Access</h3>
               <p className="text-balance text-muted-foreground">
                 We automatically grant you access to all invite-only strategies on TradingView.
               </p>
             </div>
-            <div className="relative text-center">
-              <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/5 ring-1 ring-primary/10">
-                <span className="text-2xl font-bold text-primary">3</span>
+            <div className="relative text-center slide-in-right">
+              <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-accent/20 to-accent/5 ring-2 ring-accent/20 shadow-lg">
+                <span className="text-3xl font-bold gradient-text">3</span>
               </div>
               <h3 className="mb-3 text-xl font-semibold">Add to Your Charts</h3>
               <p className="text-balance text-muted-foreground">
@@ -124,7 +133,7 @@ export default async function HomePage() {
       </section>
 
       {/* Strategies Preview */}
-      <section className="border-t bg-muted/20 py-24 md:py-32">
+      <section className="border-t gradient-bg py-24 md:py-32">
         <div className="container">
           <div className="mx-auto max-w-2xl text-center mb-16 md:mb-20">
             <h2 className="text-balance text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl">
@@ -135,14 +144,15 @@ export default async function HomePage() {
             </p>
           </div>
           <div className="mx-auto grid max-w-6xl gap-6 md:grid-cols-2 lg:grid-cols-3">
-            {strategies.map((strategy) => (
+            {strategies.map((strategy, index) => (
               <Card 
                 key={strategy.id} 
-                className="group transition-all hover:shadow-lg hover:shadow-primary/5 hover:-translate-y-1"
+                className="group card-hover glass border-2"
+                style={{ animationDelay: `${index * 100}ms` }}
               >
                 <CardHeader className="space-y-4">
                   <div className="flex items-center justify-between">
-                    <Badge variant="outline" className="font-medium">
+                    <Badge variant="outline" className="font-medium border-primary/30 bg-primary/5">
                       {strategy.style}
                     </Badge>
                     <span className="text-sm font-medium text-muted-foreground">
@@ -150,7 +160,7 @@ export default async function HomePage() {
                     </span>
                   </div>
                   <div>
-                    <CardTitle className="text-xl mb-2">{strategy.name}</CardTitle>
+                    <CardTitle className="text-xl mb-2 gradient-text">{strategy.name}</CardTitle>
                     <CardDescription className="text-base leading-relaxed">
                       {strategy.description}
                     </CardDescription>
@@ -178,7 +188,7 @@ export default async function HomePage() {
             ))}
           </div>
           <div className="mt-12 text-center md:mt-16">
-            <Button size="lg" variant="outline" asChild>
+            <Button size="lg" variant="outline" className="border-2" asChild>
               <Link href="/strategies">View All Strategies</Link>
             </Button>
           </div>
@@ -194,8 +204,8 @@ export default async function HomePage() {
             </h2>
           </div>
           <div className="mx-auto grid max-w-5xl gap-x-8 gap-y-12 md:grid-cols-2 lg:grid-cols-3">
-            <div className="flex gap-4">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/5 ring-1 ring-primary/10">
+            <div className="flex gap-4 group">
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 ring-2 ring-primary/20 shadow-lg group-hover:shadow-xl transition-shadow">
                 <BarChart3 className="h-6 w-6 text-primary" />
               </div>
               <div>
@@ -205,9 +215,9 @@ export default async function HomePage() {
                 </p>
               </div>
             </div>
-            <div className="flex gap-4">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/5 ring-1 ring-primary/10">
-                <TrendingUp className="h-6 w-6 text-primary" />
+            <div className="flex gap-4 group">
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-secondary/20 to-secondary/5 ring-2 ring-secondary/20 shadow-lg group-hover:shadow-xl transition-shadow">
+                <TrendingUp className="h-6 w-6 text-secondary" />
               </div>
               <div>
                 <h3 className="mb-2 text-lg font-semibold">Systematic Edge</h3>
@@ -216,9 +226,9 @@ export default async function HomePage() {
                 </p>
               </div>
             </div>
-            <div className="flex gap-4">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/5 ring-1 ring-primary/10">
-                <Clock className="h-6 w-6 text-primary" />
+            <div className="flex gap-4 group">
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-accent/20 to-accent/5 ring-2 ring-accent/20 shadow-lg group-hover:shadow-xl transition-shadow">
+                <Clock className="h-6 w-6 text-accent" />
               </div>
               <div>
                 <h3 className="mb-2 text-lg font-semibold">All Sessions Covered</h3>
@@ -227,9 +237,9 @@ export default async function HomePage() {
                 </p>
               </div>
             </div>
-            <div className="flex gap-4">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/5 ring-1 ring-primary/10">
-                <Zap className="h-6 w-6 text-primary" />
+            <div className="flex gap-4 group">
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-success/20 to-success/5 ring-2 ring-success/20 shadow-lg group-hover:shadow-xl transition-shadow">
+                <Zap className="h-6 w-6 text-success" />
               </div>
               <div>
                 <h3 className="mb-2 text-lg font-semibold">Plug-and-Play</h3>
@@ -238,9 +248,9 @@ export default async function HomePage() {
                 </p>
               </div>
             </div>
-            <div className="flex gap-4">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/5 ring-1 ring-primary/10">
-                <Shield className="h-6 w-6 text-primary" />
+            <div className="flex gap-4 group">
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-warning/20 to-warning/5 ring-2 ring-warning/20 shadow-lg group-hover:shadow-xl transition-shadow">
+                <Shield className="h-6 w-6 text-warning" />
               </div>
               <div>
                 <h3 className="mb-2 text-lg font-semibold">You Control Trades</h3>
@@ -249,8 +259,8 @@ export default async function HomePage() {
                 </p>
               </div>
             </div>
-            <div className="flex gap-4">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/5 ring-1 ring-primary/10">
+            <div className="flex gap-4 group">
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 ring-2 ring-primary/20 shadow-lg group-hover:shadow-xl transition-shadow">
                 <CheckCircle className="h-6 w-6 text-primary" />
               </div>
               <div>
@@ -265,7 +275,7 @@ export default async function HomePage() {
       </section>
 
       {/* Pricing Preview */}
-      <section className="border-t bg-muted/20 py-24 md:py-32">
+      <section className="border-t gradient-bg py-24 md:py-32">
         <div className="container">
           <div className="mx-auto max-w-2xl text-center mb-12">
             <h2 className="text-balance text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl mb-4">
@@ -275,12 +285,12 @@ export default async function HomePage() {
               One price. All strategies. Lifetime access.
             </p>
           </div>
-          <Card className="mx-auto max-w-lg border-2 shadow-lg">
+          <Card className="mx-auto max-w-lg glass border-2 border-primary/20 shadow-2xl glow">
             <CardHeader className="text-center space-y-6 pb-8">
               <CardTitle className="text-2xl">Lifetime Access</CardTitle>
               <div>
                 <div className="flex items-baseline justify-center gap-2">
-                  <span className="text-6xl font-bold tracking-tight">
+                  <span className="text-6xl font-bold tracking-tight gradient-text">
                     {formatCurrency(PRICING.LIFETIME_AMOUNT)}
                   </span>
                   <span className="text-lg text-muted-foreground">one-time</span>
@@ -298,12 +308,12 @@ export default async function HomePage() {
                   "No recurring fees",
                 ].map((feature) => (
                   <li key={feature} className="flex items-start gap-3">
-                    <CheckCircle className="h-5 w-5 shrink-0 text-primary mt-0.5" />
+                    <CheckCircle className="h-5 w-5 shrink-0 text-success mt-0.5" />
                     <span className="text-muted-foreground">{feature}</span>
                   </li>
                 ))}
               </ul>
-              <Button size="lg" className="w-full group" asChild>
+              <Button size="lg" className="w-full group glow-hover shadow-lg" asChild>
                 <Link href="/pricing">
                   Get Started
                   <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
@@ -327,7 +337,7 @@ export default async function HomePage() {
           </div>
           <div className="mx-auto max-w-3xl">
             <Accordion type="single" collapsible className="space-y-4">
-              <AccordionItem value="item-1" className="border rounded-lg px-6">
+              <AccordionItem value="item-1" className="glass border-2 rounded-lg px-6">
                 <AccordionTrigger className="text-left text-lg font-semibold hover:no-underline">
                   Is this automated trading or a signal service?
                 </AccordionTrigger>
@@ -335,7 +345,7 @@ export default async function HomePage() {
                   Neither. We provide TradingView strategies that display signals on your charts. You maintain full control and manually execute trades based on the signals you see. This is not automated trading or a signal subscription service.
                 </AccordionContent>
               </AccordionItem>
-              <AccordionItem value="item-2" className="border rounded-lg px-6">
+              <AccordionItem value="item-2" className="glass border-2 rounded-lg px-6">
                 <AccordionTrigger className="text-left text-lg font-semibold hover:no-underline">
                   What do I need to use the strategies?
                 </AccordionTrigger>
@@ -343,7 +353,7 @@ export default async function HomePage() {
                   You need a TradingView account (free or paid) and a brokerage account to execute trades. The strategies work on any TradingView plan, but a paid plan is recommended for real-time data.
                 </AccordionContent>
               </AccordionItem>
-              <AccordionItem value="item-3" className="border rounded-lg px-6">
+              <AccordionItem value="item-3" className="glass border-2 rounded-lg px-6">
                 <AccordionTrigger className="text-left text-lg font-semibold hover:no-underline">
                   How fast do I get access?
                 </AccordionTrigger>
@@ -351,7 +361,7 @@ export default async function HomePage() {
                   Access is typically granted within 24 hours of purchase. You'll receive an email with instructions once your TradingView account has been granted access to all strategies.
                 </AccordionContent>
               </AccordionItem>
-              <AccordionItem value="item-4" className="border rounded-lg px-6">
+              <AccordionItem value="item-4" className="glass border-2 rounded-lg px-6">
                 <AccordionTrigger className="text-left text-lg font-semibold hover:no-underline">
                   Can I cancel and get a refund?
                 </AccordionTrigger>
@@ -361,7 +371,7 @@ export default async function HomePage() {
               </AccordionItem>
             </Accordion>
             <div className="mt-12 text-center">
-              <Button variant="outline" size="lg" asChild>
+              <Button variant="outline" size="lg" className="border-2" asChild>
                 <Link href="/faq">View All FAQs</Link>
               </Button>
             </div>
@@ -370,7 +380,7 @@ export default async function HomePage() {
       </section>
 
       {/* Risk Disclaimer */}
-      <section className="border-t bg-muted/20 py-16 md:py-20">
+      <section className="border-t gradient-bg py-16 md:py-20">
         <div className="container">
           <div className="mx-auto max-w-4xl text-center">
             <h2 className="mb-6 text-2xl font-bold">Important Risk Disclosure</h2>
@@ -388,20 +398,20 @@ export default async function HomePage() {
       <section className="border-t py-24 md:py-32">
         <div className="container">
           <div className="mx-auto max-w-3xl text-center">
-            <h2 className="text-balance text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl mb-6">
+            <h2 className="text-balance text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl mb-6 gradient-text">
               Ready to Add a Systematic Edge?
             </h2>
             <p className="text-balance text-lg text-muted-foreground mb-10">
               Join traders who use data-driven strategies to approach the markets systematically.
             </p>
             <div className="flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
-              <Button size="lg" className="w-full sm:w-auto group" asChild>
+              <Button size="lg" className="w-full sm:w-auto group glow-hover shadow-lg" asChild>
                 <Link href="/pricing">
                   Get Lifetime Access
                   <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
                 </Link>
               </Button>
-              <Button size="lg" variant="outline" className="w-full sm:w-auto" asChild>
+              <Button size="lg" variant="outline" className="w-full sm:w-auto border-2" asChild>
                 <Link href="/strategies">Explore Strategies</Link>
               </Button>
             </div>

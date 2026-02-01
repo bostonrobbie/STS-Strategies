@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Menu, X } from "lucide-react";
 import { useState } from "react";
 
@@ -39,7 +40,8 @@ export function Header() {
         </nav>
 
         {/* Auth Buttons */}
-        <div className="hidden md:flex items-center space-x-4">
+        <div className="hidden md:flex items-center space-x-2">
+          <ThemeToggle />
           {session ? (
             <Button asChild>
               <Link href="/dashboard">Dashboard</Link>
@@ -85,6 +87,9 @@ export function Header() {
               </Link>
             ))}
             <div className="pt-4 border-t space-y-2">
+              <div className="flex justify-center pb-2">
+                <ThemeToggle />
+              </div>
               {session ? (
                 <Button asChild className="w-full">
                   <Link href="/dashboard">Dashboard</Link>
