@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
+    "@sentry/node": "^10.38.0",
     "@sts/database": "workspace:*",
     "@sts/email": "workspace:*",
     "@sts/shared": "workspace:*",

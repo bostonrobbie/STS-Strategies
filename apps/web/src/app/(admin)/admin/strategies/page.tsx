@@ -1,5 +1,7 @@
+import Link from "next/link";
 import { prisma } from "@sts/database";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -42,6 +44,9 @@ export default async function StrategiesPage() {
             Manage your trading strategies
           </p>
         </div>
+        <Button asChild>
+          <Link href="/admin/strategies/new">Create Strategy</Link>
+        </Button>
       </div>
 
       <div className="grid gap-6">
@@ -175,18 +180,7 @@ export default async function StrategiesPage() {
         })}
       </div>
 
-      <Card>
-        <CardContent className="py-6 text-center text-muted-foreground">
-          <p className="text-sm">
-            Strategy editing is managed through the database seed file. To add
-            or modify strategies, update{" "}
-            <code className="bg-muted px-1 py-0.5 rounded">
-              packages/database/prisma/seed.ts
-            </code>{" "}
-            and run <code className="bg-muted px-1 py-0.5 rounded">pnpm db:seed</code>
-          </p>
-        </CardContent>
-      </Card>
+
     </div>
   );
 }

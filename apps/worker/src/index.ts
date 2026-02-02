@@ -5,10 +5,14 @@ import { Worker, QueueEvents } from "bullmq";
 import IORedis from "ioredis";
 import { config, validateConfig } from "./lib/config.js";
 import { prisma } from "./lib/prisma.js";
+import { initSentry, captureJobError } from "./lib/sentry.js";
 import {
   processProvisioningJob,
   ProvisioningJobData,
 } from "./processors/provisioning.processor.js";
+
+// Initialize Sentry for error tracking
+initSentry();
 
 // Validate configuration on startup
 validateConfig();
