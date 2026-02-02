@@ -1,11 +1,13 @@
 import { NextAuthOptions } from "next-auth";
 import EmailProvider from "next-auth/providers/email";
+import CredentialsProvider from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { db } from "@sts/database";
 import { Resend } from "resend";
 import { render } from "@react-email/render";
 import { MagicLinkEmail } from "@sts/email";
+import { verifyPassword } from "./password";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -20,6 +22,47 @@ export const authOptions: NextAuthOptions = {
     error: "/login",
   },
   providers: [
+    CredentialsProvider({
+      name: "credentials",
+      credentials: {
+        email: { label: "Email", type: "email" },
+        password: { label: "Password", type: "password" },
+      },
+      async authorize(credentials) {
+        if (!credentials?.email || !credentials?.password) {
+          throw new Error("Email and password are required");
+        }
+
+        // Find user by email
+        const user = await db.user.findUnique({
+          where: { email: credentials.email.toLowerCase() },
+        });
+
+        if (!user || !user.password) {
+          throw new Error("Invalid email or password");
+        }
+
+        // Verify password
+        const isValid = await verifyPassword(
+          credentials.password,
+          user.password
+        );
+
+        if (!isValid) {
+          throw new Error("Invalid email or password");
+        }
+
+        // Return user object
+        return {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          onboarded: user.onboarded,
+          tradingViewUsername: user.tradingViewUsername,
+        };
+      },
+    }),
     EmailProvider({
       from: process.env.EMAIL_FROM || "noreply@example.com",
       sendVerificationRequest: async ({ identifier: email, url }) => {
@@ -53,7 +96,7 @@ export const authOptions: NextAuthOptions = {
             userId: user.id,
             action: "user.login",
             details: {
-              provider: account?.provider || "email",
+              provider: account?.provider || "credentials",
             },
           },
         });
