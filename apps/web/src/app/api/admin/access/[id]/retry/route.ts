@@ -40,6 +40,9 @@ export async function POST(
 
     // Queue provisioning job
     const jobId = `retry-${params.id}-${Date.now()}`;
+    if (!provisioningQueue) {
+      throw new Error("Provisioning queue not initialized");
+    }
     await provisioningQueue.add(
       "provision",
       {

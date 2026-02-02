@@ -70,7 +70,7 @@ export const authOptions: NextAuthOptions = {
           from: process.env.EMAIL_FROM || "noreply@example.com",
           to: email,
           subject: "Sign in to STS Strategies",
-          html: render(MagicLinkEmail({ url, expires: "24 hours" })),
+          html: await render(MagicLinkEmail({ url, expires: "24 hours" })),
         });
 
         if (result.error) {
@@ -183,7 +183,7 @@ export const authOptions: NextAuthOptions = {
           from: process.env.EMAIL_FROM || "noreply@example.com",
           to: user.email,
           subject: "Welcome to STS Strategies",
-          html: render(
+          html: await render(
             (await import("@sts/email")).WelcomeEmail({
               name: user.name || undefined,
               dashboardUrl: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard`,

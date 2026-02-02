@@ -65,7 +65,7 @@ export async function POST(
 
     await prisma.systemConfig.update({
       where: { key: `manual_task:${taskId}` },
-      data: { value: task as unknown as Record<string, unknown> },
+      data: { value: task as any },
     });
 
     // If we have a strategyAccessId, update the access record

@@ -10,9 +10,7 @@ Sentry.init({
   tracesSampleRate: process.env.NODE_ENV === "production" ? 0.1 : 1.0,
   
   // Enable performance monitoring
-  integrations: [
-    new Sentry.Integrations.Http({ tracing: true }),
-  ],
+  integrations: [],
   
   // Filter sensitive data
   beforeSend(event) {

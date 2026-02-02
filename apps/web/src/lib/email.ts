@@ -20,7 +20,7 @@ export async function sendWelcomeEmail(to: string, name?: string) {
     from: fromEmail,
     to,
     subject: "Welcome to STS Strategies",
-    html: render(
+    html: await render(
       WelcomeEmail({
         name,
         dashboardUrl: absoluteUrl("/dashboard"),
@@ -42,7 +42,7 @@ export async function sendPurchaseConfirmationEmail(
     from: fromEmail,
     to,
     subject: "Thank you for your purchase - STS Strategies",
-    html: render(
+    html: await render(
       PurchaseConfirmationEmail({
         name: data.name,
         amount: formatCurrency(data.amount),
@@ -66,7 +66,7 @@ export async function sendAccessGrantedEmail(
     from: fromEmail,
     to,
     subject: "Your TradingView access has been granted",
-    html: render(
+    html: await render(
       AccessGrantedEmail({
         name: data.name,
         tradingViewUsername: data.tradingViewUsername,
@@ -90,7 +90,7 @@ export async function sendAccessFailedEmail(
     from: fromEmail,
     to,
     subject: "Action Required: TradingView Access Issue",
-    html: render(
+    html: await render(
       AccessFailedEmail({
         name: data.name,
         tradingViewUsername: data.tradingViewUsername,
@@ -123,7 +123,7 @@ export async function sendTicketCreatedEmail(
     from: fromEmail,
     to,
     subject: `Support Ticket Created: ${data.subject}`,
-    html: render(
+    html: await render(
       TicketCreatedEmail({
         name: data.name,
         ticketId: data.ticketId,
@@ -147,7 +147,7 @@ export async function sendTicketReplyEmail(
     from: fromEmail,
     to,
     subject: `New Reply on Your Support Ticket: ${data.subject}`,
-    html: render(
+    html: await render(
       TicketReplyEmail({
         name: data.name,
         ticketId: data.ticketId,
@@ -173,7 +173,7 @@ export async function sendAdminAlert(
     from: fromEmail,
     to: adminEmail,
     subject: `[Admin Alert] ${title}`,
-    html: render(
+    html: await render(
       AdminAlertEmail({
         alertType,
         title,
